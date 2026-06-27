@@ -1,0 +1,178 @@
+{% extends 'escala/base.html' %}
+{% block title %}Configurações — EscalaJa{% endblock %}
+
+{% block content %}
+<h2>⚙️ Configurações do Sistema</h2>
+
+<style>
+.config-card {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    overflow: hidden;
+    max-width: 700px;
+}
+.config-card-header {
+    padding: 16px 20px;
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: white;
+}
+.config-card-body { padding: 20px; }
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.toggle-label { font-size: 14px; color: #333; }
+.toggle-desc  { font-size: 12px; color: #888; margin-top: 2px; }
+
+/* Switch */
+.switch { position: relative; display: inline-block; width: 52px; height: 28px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #ccc; border-radius: 28px; transition: .3s;
+}
+.slider:before {
+    position: absolute; content: "";
+    height: 20px; width: 20px; left: 4px; bottom: 4px;
+    background: white; border-radius: 50%; transition: .3s;
+}
+input:checked + .slider { background: #3b82f6; }
+input:checked + .slider:before { transform: translateX(24px); }
+
+.regime-select {
+    padding: 8px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-top: 10px;
+    width: 100%;
+    transition: border-color .2s;
+}
+.regime-select:focus { outline: none; border-color: #3b82f6; }
+
+.regime-row { margin-top: 10px; }
+.regime-row label { font-size: 13px; color: #555; margin-bottom: 5px; display: block; }
+
+.info-box {
+    background: #eff6ff;
+    border-left: 4px solid #3b82f6;
+    padding: 12px 15px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1e40af;
+    margin-top: 12px;
+}
+
+.badge-regime {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+}
+.badge-6x1 { background: #d1fae5; color: #065f46; }
+.badge-fixo { background: #e0e7ff; color: #3730a3; }
+</style>
+
+<form method="POST">
+{% csrf_token %}
+
+<!-- Regra 1: Folgas consecutivas -->
+<div class="config-card">
+    <div class="config-card-header" style="background:#f59e0b;">
+        📋 Regra: Folgas consecutivas
+    </div>
+    <div class="config-card-body">
+        <div class="toggle-row">
+            <div>
+                <div class="toggle-label">Proibir folgas em dias consecutivos</div>
+                <div class="toggle-desc">Quando ativo, o sistema não permite duas folgas seguidas na geração</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="consecutivas_ativo" id="consecutivas_ativo"
+                       {% if config.consecutivas_ativo %}checked{% endif %}
+                       onchange="toggleRegimeSelect()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="regime-row" id="regime_row" style="{% if not config.consecutivas_ativo %}opacity:.4;pointer-events:none{% endif %}">
+            <label>Aplicar esta regra para qual regime:</label>
+            <select name="consecutivas_regime" class="regime-select">
+                <option value="5x2"  {% if config.consecutivas_regime == '5x2'  %}selected{% endif %}>
+                    Apenas 5x2 — trabalha 5, folga 2/semana
+                </option>
+                <option value="6x1"  {% if config.consecutivas_regime == '6x1'  %}selected{% endif %}>
+                    Apenas 6x1 — trabalha 6, folga 1/semana
+                </option>
+                <option value="AMBOS" {% if config.consecutivas_regime == 'AMBOS' %}selected{% endif %}>
+                    Ambos os regimes
+                </option>
+            </select>
+        </div>
+
+        <div class="info-box">
+            Para <strong>6x1</strong> (1 folga/semana) folgas consecutivas são quase impossíveis naturalmente.
+            Desativar esta regra para 6x1 dá mais liberdade ao algoritmo e pode melhorar o resultado.
+        </div>
+    </div>
+</div>
+
+<!-- Regra 2: Priorizar domingo -->
+<div class="config-card">
+    <div class="config-card-header" style="background:#6366f1;">
+        📋 Regra: Priorizar domingo de folga
+    </div>
+    <div class="config-card-body">
+        <div class="toggle-row">
+            <div>
+                <div class="toggle-label">
+                    Tentar dar pelo menos 1 domingo de folga por mês
+                    <span class="badge-regime badge-6x1">Apenas 6x1</span>
+                    <span class="badge-regime badge-fixo">Fixo</span>
+                </div>
+                <div class="toggle-desc">
+                    O sistema tentará trocar uma folga da semana para o domingo do funcionário 6x1.
+                    Para 5x2 esta regra não se aplica.
+                </div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="domingo_ativo"
+                       {% if config.domingo_ativo %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="info-box">
+            <strong>Regime fixo: 6x1.</strong> Para 5x2 (2 folgas/semana) o sistema já distribui
+            domingos naturalmente — esta regra não interfere com eles.
+        </div>
+    </div>
+</div>
+
+<button type="submit" class="btn btn-success" style="min-width:160px;">
+    💾 Salvar Configurações
+</button>
+<a href="{% url 'escala:dashboard' %}" class="btn btn-secondary" style="margin-left:10px;">
+    ← Voltar
+</a>
+</form>
+
+<script>
+function toggleRegimeSelect() {
+    const ativo = document.getElementById('consecutivas_ativo').checked;
+    const row   = document.getElementById('regime_row');
+    row.style.opacity = ativo ? '1' : '0.4';
+    row.style.pointerEvents = ativo ? 'auto' : 'none';
+}
+</script>
+{% endblock %}

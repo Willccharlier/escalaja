@@ -1,0 +1,441 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Registrar Ocorrência{% endblock %}
+
+{% block content %}
+<h2>🚨 Registrar Ocorrência</h2>
+
+<style>
+.form-section {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.form-section h3 {
+  margin: 0 0 15px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #e0e0e0;
+  color: #2c3e50;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: #2c3e50;
+}
+
+.form-control {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: border-color 0.3s;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.datetime-container {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  border: 2px solid #e0e0e0;
+}
+
+.datetime-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 15px;
+  align-items: end;
+}
+
+.btn-now {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.btn-now:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.info-box {
+  background: #e3f2fd;
+  border-left: 4px solid #2196f3;
+  padding: 12px 15px;
+  border-radius: 4px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: #0d47a1;
+}
+
+.busca-extra {
+  display: none;
+  border: 2px solid #ffc107;
+  background: #fffbea;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.alert-warning {
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  padding: 12px 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  color: #856404;
+}
+
+.help-icon {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  margin-left: 5px;
+  padding: 0;
+  line-height: 1;
+  transition: transform 0.2s;
+  vertical-align: middle;
+}
+
+.help-icon:hover {
+  transform: scale(1.2);
+}
+
+.tooltip-help {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  z-index: 10000;
+  max-width: 500px;
+  width: 90%;
+  animation: slideIn 0.3s ease;
+}
+
+.tooltip-help.show {
+  display: block;
+}
+
+.tooltip-content {
+  padding: 20px;
+  position: relative;
+}
+
+.tooltip-content p {
+  margin: 0;
+  line-height: 1.6;
+  color: #2c3e50;
+}
+
+.tooltip-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #e0e0e0;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: bold;
+  color: #666;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tooltip-close:hover {
+  background: #d0d0d0;
+  transform: rotate(90deg);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -45%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+</style>
+
+<form method="post">
+{% csrf_token %}
+
+<!-- DATA/HORA DA OCORRÊNCIA -->
+<div class="form-section">
+  <h3>📅 Data e Hora da Ocorrência</h3>
+  
+  <div class="datetime-container">
+    <div class="datetime-grid">
+      <div class="form-group" style="margin-bottom: 0;">
+        <label class="form-label">
+          Data da Ocorrência
+          <button type="button" class="help-icon" id="help-datetime">❓</button>
+        </label>
+        <input 
+          type="date" 
+          id="data-ocorrencia" 
+          name="data_ocorrencia" 
+          class="form-control"
+          max="{{ hoje|date:'Y-m-d' }}"
+        >
+      </div>
+      
+      <div class="form-group" style="margin-bottom: 0;">
+        <label class="form-label">Hora da Ocorrência</label>
+        <input 
+          type="time" 
+          id="hora-ocorrencia" 
+          name="hora_ocorrencia" 
+          class="form-control"
+        >
+      </div>
+      
+      <button type="button" id="btn-agora" class="btn-now">
+        ⚡ Ocorrência Agora
+      </button>
+    </div>
+  </div>
+  
+  <!-- Tooltip de Ajuda -->
+  <div id="tooltip-help" class="tooltip-help">
+    <div class="tooltip-content">
+      <button type="button" class="tooltip-close" id="close-tooltip">✕</button>
+      <p>
+        💡 <strong>Dica:</strong> Clique em "Ocorrência Agora" para preencher automaticamente com data/hora atual. 
+        Ou informe manualmente caso a ocorrência tenha acontecido anteriormente. 
+        <strong>Não é permitido registrar ocorrências futuras.</strong>
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- TIPO -->
+<div class="form-section">
+  <h3>📋 Tipo de Ocorrência</h3>
+  <div class="form-group">
+    <label class="form-label">Tipo de Ocorrência *</label>
+    <select name="tipo" required class="form-control">
+      <option value="">Selecione...</option>
+      {% for tipo in tipos %}
+        <option value="{{ tipo.id }}">
+          {{ tipo.get_categoria_display }} - {{ tipo.nome }}
+          {% if tipo.gravidade == 'CRITICA' %}🔴{% elif tipo.gravidade == 'ATENCAO' %}🟡{% else %}🟢{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<!-- FUNCIONÁRIO DO PLANTÃO -->
+<div class="form-section" id="bloco-plantao">
+  <h3>👤 Funcionário Envolvido</h3>
+  <div class="form-group">
+    <label class="form-label">Funcionário em Plantão *</label>
+    <select id="funcionario-plantao" name="funcionario" class="form-control">
+      <option value="">Selecione...</option>
+      {% for f in funcionarios %}
+        <option value="{{ f.id }}">
+          {{ f.nome }} ({{ f.turno.nome }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  
+  <button type="button" id="btn-localizar" class="btn btn-warning" style="margin-top: 10px;">
+    🔍 Localizar funcionário de outro plantão
+  </button>
+</div>
+
+<!-- BUSCA EXTRA -->
+<div id="busca-funcionario" class="busca-extra">
+  <div class="alert-warning">
+    ⚠️ <strong>Atenção:</strong> Você está selecionando um funcionário que não está no plantão atual.
+    É necessário justificar.
+  </div>
+  
+  <div class="form-group">
+    <label class="form-label">Funcionário</label>
+    <select id="funcionario-extra" name="funcionario_extra" class="form-control">
+      <option value="">Selecione...</option>
+      {% for f in funcionarios_todos %}
+        <option value="{{ f.id }}">
+          {{ f.nome }} ({{ f.turno.nome }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Justificativa *</label>
+    <textarea 
+      name="justificativa_extra" 
+      rows="3" 
+      class="form-control"
+      placeholder="Explique por que este funcionário fora do plantão está envolvido..."
+    ></textarea>
+  </div>
+</div>
+
+<!-- DESCRIÇÃO -->
+<div class="form-section">
+  <h3>📝 Detalhes da Ocorrência</h3>
+  <div class="form-group">
+    <label class="form-label">Descrição</label>
+    <textarea 
+      name="descricao" 
+      rows="4" 
+      class="form-control"
+      placeholder="Descreva o que aconteceu..."
+    ></textarea>
+  </div>
+</div>
+
+<!-- AÇÃO -->
+<div class="form-section">
+  <h3>✅ Ação Tomada</h3>
+  <div class="form-group">
+    <label class="form-label">Ação Tomada</label>
+    <textarea 
+      name="acao" 
+      rows="3" 
+      class="form-control"
+      placeholder="Descreva as ações que foram tomadas..."
+    ></textarea>
+  </div>
+</div>
+
+<!-- BOTÕES -->
+<div class="form-section" style="display: flex; gap: 10px;">
+  <button type="submit" class="btn btn-success">💾 Registrar Ocorrência</button>
+  <a href="{% url 'escala:dashboard' %}" class="btn btn-secondary">❌ Cancelar</a>
+</div>
+
+</form>
+
+<script>
+// Tooltip de Ajuda
+document.getElementById('help-datetime').addEventListener('click', function(e) {
+  e.preventDefault();
+  document.getElementById('tooltip-help').classList.add('show');
+});
+
+document.getElementById('close-tooltip').addEventListener('click', function() {
+  document.getElementById('tooltip-help').classList.remove('show');
+});
+
+// Fechar tooltip ao clicar fora
+document.getElementById('tooltip-help').addEventListener('click', function(e) {
+  if (e.target === this) {
+    this.classList.remove('show');
+  }
+});
+
+// Botão "Ocorrência Agora"
+document.getElementById('btn-agora').addEventListener('click', function() {
+  const agora = new Date();
+  
+  // Formatar data (YYYY-MM-DD)
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  const dataFormatada = `${ano}-${mes}-${dia}`;
+  
+  // Formatar hora (HH:MM)
+  const horas = String(agora.getHours()).padStart(2, '0');
+  const minutos = String(agora.getMinutes()).padStart(2, '0');
+  const horaFormatada = `${horas}:${minutos}`;
+  
+  // Preencher campos
+  document.getElementById('data-ocorrencia').value = dataFormatada;
+  document.getElementById('hora-ocorrencia').value = horaFormatada;
+  
+  // Feedback visual
+  const btn = this;
+  const textoOriginal = btn.innerHTML;
+  btn.innerHTML = '✅ Preenchido!';
+  btn.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)';
+  
+  setTimeout(() => {
+    btn.innerHTML = textoOriginal;
+    btn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+  }, 2000);
+});
+
+// Lógica do funcionário extra
+const btnLocalizar = document.getElementById('btn-localizar');
+const blocoPlantao = document.getElementById('bloco-plantao');
+const selectPlantao = document.getElementById('funcionario-plantao');
+const blocoExtra = document.getElementById('busca-funcionario');
+const selectExtra = document.getElementById('funcionario-extra');
+
+btnLocalizar.onclick = function () {
+  blocoExtra.style.display = 'block';
+  selectPlantao.value = '';
+  selectPlantao.disabled = true;
+  blocoPlantao.style.opacity = '0.5';
+  
+  // Scroll suave até o bloco extra
+  blocoExtra.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+// Se limpar o funcionário extra, volta o plantão
+selectExtra.onchange = function () {
+  if (!this.value) {
+    selectPlantao.disabled = false;
+    blocoPlantao.style.opacity = '1';
+  }
+};
+
+// Validação antes de enviar
+document.querySelector('form').addEventListener('submit', function(e) {
+  const dataOcorrencia = document.getElementById('data-ocorrencia').value;
+  const horaOcorrencia = document.getElementById('hora-ocorrencia').value;
+  
+  // Se informou data/hora, validar se não é futura
+  if (dataOcorrencia && horaOcorrencia) {
+    const dataHoraInformada = new Date(dataOcorrencia + 'T' + horaOcorrencia);
+    const agora = new Date();
+    
+    if (dataHoraInformada > agora) {
+      e.preventDefault();
+      alert('❌ Não é permitido registrar ocorrências futuras!\n\nA data/hora informada é posterior ao momento atual.');
+      return false;
+    }
+  }
+});
+</script>
+
+{% endblock %}

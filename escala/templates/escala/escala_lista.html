@@ -1,0 +1,40 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Escalas - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>📋 Todas as Escalas</h2>
+
+<p>
+    <a href="{% url 'escala:gerar_escala' %}" class="btn btn-success">➕ Gerar Nova Escala</a>
+</p>
+
+{% if escalas %}
+<table>
+    <tr>
+        <th>Período</th>
+        <th>Status</th>
+        <th>Data Geração</th>
+        <th>Ações</th>
+    </tr>
+    {% for escala in escalas %}
+    <tr>
+        <td>{{ escala }}</td>
+        <td>
+            {% if escala.gerada_com_sucesso %}
+            ✅ Sucesso
+            {% else %}
+            ⚠️ Com problemas
+            {% endif %}
+        </td>
+        <td>{{ escala.data_geracao|date:"d/m/Y H:i" }}</td>
+        <td>
+            <a href="{% url 'escala:escala_detalhe' escala.pk %}" class="btn">Ver Detalhes</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>Nenhuma escala cadastrada.</p>
+{% endif %}
+{% endblock %}

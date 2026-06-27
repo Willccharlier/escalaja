@@ -1,0 +1,94 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Tipos de Ocorrência - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>📋 Tipos de Ocorrência</h2>
+
+<div style="margin: 20px 0;">
+    <a href="{% url 'escala:tipo_ocorrencia_novo' %}" class="btn btn-success">➕ Novo Tipo</a>
+    <a href="{% url 'escala:dashboard' %}" class="btn btn-secondary">← Voltar</a>
+</div>
+
+<style>
+    .tipo-table {
+        width: 100%;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .tipo-table th,
+    .tipo-table td {
+        padding: 15px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .tipo-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        font-size: 14px;
+        text-transform: uppercase;
+        color: #666;
+    }
+
+    .tipo-table tbody tr:hover { background: #f8f9fa; }
+
+    .badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .badge-critica  { background: #fde8e8; color: #c0392b; }
+    .badge-atencao  { background: #fff3cd; color: #856404; }
+    .badge-info     { background: #d1ecf1; color: #0c5460; }
+    .badge-ativo    { background: #d4edda; color: #155724; }
+    .badge-inativo  { background: #f8d7da; color: #721c24; }
+</style>
+
+<table class="tipo-table">
+    <thead>
+        <tr>
+            <th>Nome</th>
+            <th>Categoria</th>
+            <th>Gravidade</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tipo in tipos %}
+        <tr>
+            <td><strong>{{ tipo.nome }}</strong></td>
+            <td>{{ tipo.get_categoria_display }}</td>
+            <td>
+                {% if tipo.gravidade == 'CRITICA' %}
+                    <span class="badge badge-critica">🔴 Crítica</span>
+                {% elif tipo.gravidade == 'ATENCAO' %}
+                    <span class="badge badge-atencao">🟡 Atenção</span>
+                {% else %}
+                    <span class="badge badge-info">🔵 Informativa</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if tipo.ativo %}
+                    <span class="badge badge-ativo">✅ Ativo</span>
+                {% else %}
+                    <span class="badge badge-inativo">❌ Inativo</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4" style="text-align: center; padding: 40px; color: #666;">
+                Nenhum tipo cadastrado. Clique em "Novo Tipo" para começar.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

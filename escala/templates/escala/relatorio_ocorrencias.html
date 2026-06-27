@@ -1,0 +1,412 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Relatório de Ocorrências - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>📊 {{ titulo }}</h2>
+
+<style>
+.filtros-card {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 15px;
+}
+
+.filtro-group {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.filtro-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+}
+
+.filtro-label {
+    font-weight: 600;
+    font-size: 11px;
+    color: #2c3e50;
+    margin-bottom: 3px;
+}
+
+.filtro-input {
+    padding: 6px 8px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.filtro-input:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.filtro-radio-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.filtro-radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.stat-card {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.stat-card.critica { border-left: 3px solid #e74c3c; }
+.stat-card.atencao { border-left: 3px solid #f39c12; }
+.stat-card.info { border-left: 3px solid #3498db; }
+.stat-card.total { border-left: 3px solid #9b59b6; }
+
+.stat-numero {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 5px 0;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+}
+
+.insights-compact {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.insight-mini {
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.insight-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 8px;
+}
+
+.insight-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.insight-list li {
+    padding: 5px 0;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.insight-list li:last-child { border-bottom: none; }
+
+.insight-badge {
+    background: #e8f4f8;
+    color: #2980b9;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.tabela-ocorrencias {
+    width: 100%;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    font-size: 12px;
+}
+
+.tabela-ocorrencias th,
+.tabela-ocorrencias td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.tabela-ocorrencias th {
+    background: #f8f9fa;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #666;
+}
+
+.tabela-ocorrencias tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.badge-mini {
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-mini.critica { background: #fee; color: #c0392b; }
+.badge-mini.atencao { background: #fff3cd; color: #856404; }
+.badge-mini.info { background: #d1ecf1; color: #0c5460; }
+
+.gravidade-icon {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.gravidade-icon.critica { background: #e74c3c; }
+.gravidade-icon.atencao { background: #f39c12; }
+.gravidade-icon.info { background: #3498db; }
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 10px;
+    opacity: 0.3;
+}
+
+@media print {
+    .filtros-card, .btn, nav, .header, .footer {
+        display: none !important;
+    }
+}
+</style>
+
+<!-- FILTROS -->
+<div class="filtros-card">
+    <form method="GET" action="{% url 'escala:relatorio_ocorrencias' %}">
+        <div class="filtro-group">
+            <!-- Tipo de Filtro -->
+            <div class="filtro-field">
+                <label class="filtro-label">Tipo de Filtro</label>
+                <div class="filtro-radio-group">
+                    <label>
+                        <input type="radio" name="tipo" value="dia" 
+                               {% if filtro_tipo == 'dia' %}checked{% endif %}
+                               onchange="toggleDataInput()">
+                        Dia Específico
+                    </label>
+                    <label>
+                        <input type="radio" name="tipo" value="mes" 
+                               {% if filtro_tipo == 'mes' %}checked{% endif %}
+                               onchange="toggleDataInput()">
+                        Mês Completo
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Campo de Data -->
+            <div class="filtro-field">
+                <label class="filtro-label">Data</label>
+                <input type="date" 
+                       id="input-dia"
+                       name="data" 
+                       class="filtro-input"
+                       value="{{ data_filtro }}"
+                       style="{% if filtro_tipo == 'mes' %}display:none{% endif %}">
+                <input type="month" 
+                       id="input-mes"
+                       name="data" 
+                       class="filtro-input"
+                       value="{{ data_filtro }}"
+                       style="{% if filtro_tipo == 'dia' %}display:none{% endif %}">
+            </div>
+            
+            <!-- Botões -->
+            <div style="display: flex; gap: 10px;">
+                <button type="submit" class="btn btn-success">
+                    🔍 Filtrar
+                </button>
+                <button type="button" onclick="window.print()" class="btn btn-secondary">
+                    🖨️ Imprimir
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ESTATÍSTICAS -->
+<div class="stats-grid">
+    <div class="stat-card total">
+        <div class="stat-label">Total de Ocorrências</div>
+        <div class="stat-numero">{{ total }}</div>
+    </div>
+    
+    <div class="stat-card critica">
+        <div class="stat-label">Críticas</div>
+        <div class="stat-numero" style="color: #e74c3c;">{{ stats_gravidade.CRITICA }}</div>
+    </div>
+    
+    <div class="stat-card atencao">
+        <div class="stat-label">Atenção</div>
+        <div class="stat-numero" style="color: #f39c12;">{{ stats_gravidade.ATENCAO }}</div>
+    </div>
+    
+    <div class="stat-card info">
+        <div class="stat-label">Informativas</div>
+        <div class="stat-numero" style="color: #3498db;">{{ stats_gravidade.INFO }}</div>
+    </div>
+</div>
+
+<!-- INSIGHTS -->
+<div class="insights-compact">
+    <div class="insight-mini">
+        <div class="insight-title">📊 Top Categorias</div>
+        <ul class="insight-list">
+            {% for item in por_categoria %}
+            <li>
+                <span>{{ item.tipo__categoria }}</span>
+                <span class="insight-badge">{{ item.total }}</span>
+            </li>
+            {% empty %}
+            <li>Sem dados</li>
+            {% endfor %}
+        </ul>
+    </div>
+    
+    <div class="insight-mini">
+        <div class="insight-title">👮 Top Funcionários</div>
+        <ul class="insight-list">
+            {% for item in por_funcionario %}
+            <li>
+                <span>{{ item.funcionario__nome }}</span>
+                <span class="insight-badge">{{ item.total }}</span>
+            </li>
+            {% empty %}
+            <li>Sem dados</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<!-- TABELA DE OCORRÊNCIAS -->
+{% if ocorrencias %}
+<table class="tabela-ocorrencias">
+    <thead>
+        <tr>
+            <th style="width: 50px;"></th>
+            <th>Data/Hora</th>
+            <th>Tipo</th>
+            <th>Categoria</th>
+            <th>Funcionário</th>
+            <th>Turno</th>
+            <th>Descrição</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for oc in ocorrencias %}
+        <tr>
+            <td>
+                <span class="gravidade-icon {{ oc.tipo.gravidade|lower }}"></span>
+            </td>
+            <td style="white-space: nowrap;">
+                {{ oc.data_hora|date:"d/m" }}<br>
+                <small style="color: #666;">{{ oc.data_hora|time:"H:i" }}</small>
+            </td>
+            <td>
+                <strong>{{ oc.tipo.nome }}</strong>
+                <br>
+                <span class="badge-mini {{ oc.tipo.gravidade|lower }}">
+                    {{ oc.tipo.get_gravidade_display }}
+                </span>
+            </td>
+            <td>{{ oc.tipo.get_categoria_display }}</td>
+            <td>{{ oc.funcionario.nome }}</td>
+            <td style="white-space: nowrap;">
+                {{ oc.funcionario.turno.nome }}<br>
+                <small style="color: #666;">
+                    {{ oc.funcionario.turno.horario_entrada|time:"H:i" }}-{{ oc.funcionario.turno.horario_saida|time:"H:i" }}
+                </small>
+            </td>
+            <td>
+                {% if oc.descricao %}
+                    {{ oc.descricao|truncatewords:15 }}
+                {% endif %}
+                {% if oc.acao_tomada %}
+                    <br><small style="color: #27ae60;"><strong>Ação:</strong> {{ oc.acao_tomada|truncatewords:10 }}</small>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">📭</div>
+    <h3>Nenhuma ocorrência registrada</h3>
+    <p>Não há ocorrências para o período selecionado.</p>
+</div>
+{% endif %}
+
+<div style="margin-top: 15px;">
+    <a href="{% url 'escala:dashboard' %}" class="btn btn-secondary">
+        ← Voltar
+    </a>
+    <a href="{% url 'escala:registrar_ocorrencia' %}" class="btn btn-success">
+        🚨 Nova Ocorrência
+    </a>
+</div>
+
+<script>
+function toggleDataInput() {
+    const tipo = document.querySelector('input[name="tipo"]:checked').value;
+    const inputDia = document.getElementById('input-dia');
+    const inputMes = document.getElementById('input-mes');
+    
+    if (tipo === 'dia') {
+        inputDia.style.display = 'block';
+        inputMes.style.display = 'none';
+        inputMes.removeAttribute('name');
+        inputDia.setAttribute('name', 'data');
+    } else {
+        inputDia.style.display = 'none';
+        inputMes.style.display = 'block';
+        inputDia.removeAttribute('name');
+        inputMes.setAttribute('name', 'data');
+    }
+}
+
+// Inicializar corretamente
+document.addEventListener('DOMContentLoaded', function() {
+    toggleDataInput();
+});
+</script>
+
+{% endblock %}

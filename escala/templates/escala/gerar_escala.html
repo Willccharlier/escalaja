@@ -1,0 +1,214 @@
+{% extends 'escala/base.html' %}
+{% block title %}Gerar Escala - EscalaJa{% endblock %}
+
+{% block content %}
+<style>
+.gerar-card {
+  max-width: 420px;
+  margin: 0 auto;
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 28px 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+.gerar-titulo {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gerar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.gerar-campo label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.gerar-campo select,
+.gerar-campo input[type="number"] {
+  width: 100%;
+  padding: 14px 16px;
+  background: #0f172a;
+  border: 2px solid #334155;
+  border-radius: 10px;
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 600;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.2s;
+}
+
+.gerar-campo select:focus,
+.gerar-campo input[type="number"]:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.gerar-campo select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+}
+
+.gerar-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #0f172a;
+  border: 2px solid #334155;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 24px;
+  transition: border-color 0.2s;
+}
+
+.gerar-checkbox-label:has(input:checked) {
+  border-color: #f59e0b;
+  background: rgba(245,158,11,0.08);
+}
+
+.gerar-checkbox-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: #f59e0b;
+  margin-top: 1px;
+  cursor: pointer;
+}
+
+.gerar-checkbox-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gerar-checkbox-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.gerar-checkbox-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.gerar-botoes {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+}
+
+.btn-gerar {
+  padding: 16px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-gerar:active {
+  opacity: 0.85;
+  transform: scale(0.98);
+}
+
+.btn-cancelar {
+  padding: 16px 20px;
+  background: #334155;
+  color: #94a3b8;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.btn-cancelar:hover {
+  background: #475569;
+  color: #f1f5f9;
+}
+
+@media (max-width: 480px) {
+  .gerar-card {
+    margin: 0;
+    border-radius: 12px;
+    padding: 20px 16px;
+  }
+  .gerar-botoes {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<div class="gerar-card">
+  <div class="gerar-titulo">➕ Gerar Nova Escala</div>
+
+  <form method="POST">
+    {% csrf_token %}
+
+    <div class="gerar-grid">
+      <div class="gerar-campo">
+        <label>Mês</label>
+        <select name="mes" required>
+          {% for m in "123456789012"|make_list %}
+          <option value="{{ forloop.counter }}" {% if forloop.counter == mes_atual %}selected{% endif %}>
+            {{ forloop.counter|stringformat:"02d" }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="gerar-campo">
+        <label>Ano</label>
+        <input type="number" name="ano" value="{{ ano_atual }}" min="2024" max="2030" required>
+      </div>
+    </div>
+
+    <label class="gerar-checkbox-label">
+      <input type="checkbox" name="force">
+      <div class="gerar-checkbox-texto">
+        <span class="gerar-checkbox-titulo">Forçar regerar</span>
+        <span class="gerar-checkbox-sub">Apaga a escala existente</span>
+      </div>
+    </label>
+
+    <div class="gerar-botoes">
+      <button type="submit" class="btn-gerar">🚀 Gerar Escala</button>
+      <a href="{% url 'escala:dashboard' %}" class="btn-cancelar">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

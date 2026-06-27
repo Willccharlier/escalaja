@@ -1,0 +1,50 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Novo Tipo de Ocorrência - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>📋 Novo Tipo de Ocorrência</h2>
+
+<div style="max-width: 500px; margin-top: 20px;">
+    <form method="POST" action="{% url 'escala:tipo_ocorrencia_novo' %}">
+        {% csrf_token %}
+
+        <div style="margin-bottom: 15px;">
+            <label style="display:block; font-weight:600; margin-bottom:5px;">Nome *</label>
+            <input type="text" name="nome" class="form-control" required
+                   placeholder="Ex: Ronda Perimetral, Acesso Não Autorizado...">
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <label style="display:block; font-weight:600; margin-bottom:5px;">Categoria *</label>
+            <select name="categoria" class="form-control" required>
+                <option value="">-- Selecione --</option>
+                {% for valor, label in categorias %}
+                    <option value="{{ valor }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <label style="display:block; font-weight:600; margin-bottom:5px;">Gravidade *</label>
+            <select name="gravidade" class="form-control" required>
+                <option value="">-- Selecione --</option>
+                {% for valor, label in gravidades %}
+                    <option value="{{ valor }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display:block; font-weight:600; margin-bottom:5px;">
+                <input type="checkbox" name="ativo" checked> Ativo
+            </label>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+            <button type="submit" class="btn btn-success">💾 Salvar</button>
+            <a href="{% url 'escala:tipo_ocorrencia_lista' %}" class="btn btn-secondary">← Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

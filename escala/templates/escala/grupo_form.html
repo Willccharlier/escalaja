@@ -1,0 +1,22 @@
+{% extends 'escala/base.html' %}
+{% block title %}{% if grupo %}Editar{% else %}Novo{% endif %} Grupo - EscalaJa{% endblock %}
+{% block content %}
+<h2>🏢 {% if grupo %}Editar Grupo{% else %}Novo Grupo{% endif %}</h2>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    {% csrf_token %}
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Nome do Grupo / Setor</label>
+      <input type="text" name="nome" value="{{ grupo.nome|default:'' }}"
+             placeholder="Ex: Cozinha, Limpeza, Recepção..."
+             style="width:100%;padding:12px 16px;border:2px solid #e2e8f0;border-radius:8px;font-size:15px;box-sizing:border-box;"
+             required autofocus>
+    </div>
+    <div style="display:flex;gap:12px;">
+      <button type="submit" class="btn btn-success">💾 Salvar</button>
+      <a href="{% url 'escala:grupo_lista' %}" class="btn">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

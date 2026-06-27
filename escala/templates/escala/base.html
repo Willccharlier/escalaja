@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{% block title %}EscalaJa - Sistema de Gestão de Escalas{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #0f172a;
+            --dark-lighter: #1e293b;
+            --light-bg: #f8fafc;
+            --border: #e2e8f0;
+            --glass: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+        
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body { 
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #f1f5f9;
+            line-height: 1.6;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Background Animation */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(59, 130, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(236, 72, 153, 0.1) 0%, transparent 50%);
+            animation: float 30s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(30px, -30px) rotate(5deg); }
+            66% { transform: translate(-20px, 20px) rotate(-5deg); }
+        }
+
+        .content-wrapper {
+            position: relative;
+            z-index: 1;
+            padding-top: 80px;
+        }
+        
+        /* === FUTURISTIC NAVBAR === */
+        .navbar {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 40px);
+            max-width: 1400px;
+            height: 70px;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            box-shadow: 
+                0 10px 40px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            padding: 0 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .navbar::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(59, 130, 246, 0.5) 50%, 
+                transparent 100%);
+        }
+
+        .navbar-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            gap: 2rem;
+        }
+
+        /* Logo Futurístico */
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: white;
+            position: relative;
+        }
+
+        .logo-icon {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 30px var(--primary-glow);
+        }
+
+        .logo-icon::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transform: translateX(-100%);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0%, 100% { transform: translateX(-100%); }
+            50% { transform: translateX(100%); }
+        }
+
+        .logo-icon i {
+            width: 24px;
+            height: 24px;
+            color: white;
+            filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
+        }
+
+        .logo-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .logo-text h1 {
+            font-size: 20px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text small {
+            font-size: 10px;
+            color: #64748b;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        /* Menu Principal */
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            justify-content: center;
+        }
+
+        .nav-item {
+            position: relative;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            color: #cbd5e1;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.2), transparent);
+            transition: width 0.5s;
+        }
+
+        .nav-link:hover::before {
+            width: 100%;
+        }
+
+        .nav-link:hover {
+            color: white;
+            background: rgba(59, 130, 246, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .nav-link i {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Dropdown Futurístico */
+        .dropdown {
+            position: relative;
+        }
+
+        .dropdown-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: #cbd5e1;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .dropdown-toggle:hover {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.3);
+            color: white;
+        }
+
+        .dropdown-toggle i {
+            width: 18px;
+            height: 18px;
+        }
+
+        .dropdown-arrow {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.3s;
+        }
+
+        .dropdown.active .dropdown-arrow {
+            transform: rotate(180deg);
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: calc(100% + 12px);
+            left: 50%;
+            transform: translateX(-50%) translateY(-10px) scale(0.95);
+            min-width: 220px;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 
+                0 20px 60px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+        }
+
+        .dropdown.active .dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            color: #cbd5e1;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .dropdown-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 0;
+            background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+            border-radius: 0 3px 3px 0;
+            transition: height 0.3s;
+        }
+
+        .dropdown-item:hover::before {
+            height: 70%;
+        }
+
+        .dropdown-item:hover {
+            background: rgba(59, 130, 246, 0.1);
+            color: white;
+            padding-left: 24px;
+        }
+
+        .dropdown-item i {
+            width: 18px;
+            height: 18px;
+        }
+
+        .dropdown-item.logout {
+            color: #f87171;
+        }
+
+        .dropdown-item.logout:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: #fca5a5;
+        }
+
+        .dropdown-divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.05);
+            margin: 6px 0;
+        }
+
+        /* User Menu */
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 20px var(--primary-glow);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .user-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px var(--primary-glow);
+        }
+
+        /* Mobile Menu Button */
+        .mobile-menu-btn {
+            display: none;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            color: white;
+            width: 40px;
+            height: 40px;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .mobile-menu-btn:hover {
+            background: rgba(59, 130, 246, 0.2);
+            transform: scale(1.05);
+        }
+
+        .mobile-menu-btn i {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Mobile Sidebar */
+        .mobile-sidebar {
+            position: fixed;
+            top: 0;
+            right: -100%;
+            width: 320px;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+            transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 2000;
+            overflow-y: auto;
+        }
+
+        .mobile-sidebar.active {
+            right: 0;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-close {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 10px;
+            color: #f87171;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .sidebar-close:hover {
+            background: rgba(239, 68, 68, 0.2);
+            transform: rotate(90deg);
+        }
+
+        .sidebar-close i {
+            width: 18px;
+            height: 18px;
+        }
+
+        .sidebar-nav {
+            padding: 16px;
+        }
+
+        .sidebar-section {
+            margin-bottom: 24px;
+        }
+
+        .sidebar-section-title {
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 8px 12px;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            color: #cbd5e1;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-link:hover {
+            background: rgba(59, 130, 246, 0.1);
+            color: white;
+            transform: translateX(4px);
+        }
+
+        .sidebar-link i {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Overlay */
+        .mobile-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+            z-index: 1999;
+        }
+
+        .mobile-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* === CONTAINER === */
+        .container { 
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* === BUTTONS === */
+        .btn { 
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.9375rem;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            min-height: 44px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+        
+        .btn:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(59, 130, 246, 0.4);
+        }
+        
+        .btn-success { 
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-success:hover {
+            box-shadow: 0 6px 25px rgba(16, 185, 129, 0.4);
+        }
+        
+        .btn-danger { 
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 6px 25px rgba(239, 68, 68, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(10px);
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: none;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(30, 41, 59, 0.8);
+            color: white;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-warning:hover {
+            box-shadow: 0 6px 25px rgba(245, 158, 11, 0.4);
+        }
+        
+        /* === MESSAGES === */
+        .messages { 
+            margin: 1.5rem 0;
+        }
+        
+        .message { 
+            padding: 1rem 1.25rem;
+            margin: 0.75rem 0;
+            border-radius: 12px;
+            border-left: 4px solid;
+            font-size: 0.9375rem;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .message.success { 
+            background: rgba(16, 185, 129, 0.1);
+            color: #6ee7b7;
+            border-color: #10b981;
+        }
+        
+        .message.error { 
+            background: rgba(239, 68, 68, 0.1);
+            color: #fca5a5;
+            border-color: #ef4444;
+        }
+        
+        .message.warning { 
+            background: rgba(245, 158, 11, 0.1);
+            color: #fcd34d;
+            border-color: #f59e0b;
+        }
+
+        .message.info { 
+            background: rgba(59, 130, 246, 0.1);
+            color: #93c5fd;
+            border-color: #3b82f6;
+        }
+        
+        /* === CARDS === */
+        .card { 
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            border-radius: 16px;
+            box-shadow: 
+                0 4px 20px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1.25rem;
+            color: #f1f5f9;
+            background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* === TABLES === */
+        table { 
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        table th, table td { 
+            padding: 1rem;
+            text-align: left;
+            font-size: 0.875rem;
+            color: #cbd5e1;
+        }
+        
+        table th { 
+            background: rgba(30, 41, 59, 0.8);
+            font-weight: 700;
+            font-size: 0.8125rem;
+            text-transform: uppercase;
+            color: #94a3b8;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            letter-spacing: 0.5px;
+        }
+        
+        table td {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        table tbody tr {
+            transition: all 0.3s;
+        }
+
+        table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+        
+        /* === FOOTER === */
+        .footer {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 2rem 1rem;
+            margin-top: 4rem;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.8125rem;
+        }
+        
+        /* === RESPONSIVE === */
+        @media (max-width: 1024px) {
+            .nav-menu {
+                display: none;
+            }
+
+            .mobile-menu-btn {
+                display: flex;
+            }
+
+            .logo-text small {
+                display: none;
+            }
+
+            .navbar {
+                top: 10px;
+                width: calc(100% - 20px);
+            }
+
+            .content-wrapper {
+                padding-top: 100px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 0 1rem;
+                height: 60px;
+            }
+
+            .logo-icon {
+                width: 40px;
+                height: 40px;
+            }
+
+            .logo-text h1 {
+                font-size: 18px;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+
+            .mobile-sidebar {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Futuristic Navbar -->
+    <nav class="navbar">
+        <div class="navbar-container">
+            <!-- Logo -->
+            <a href="{% url 'escala:dashboard' %}" class="navbar-brand">
+                <div class="logo-icon">
+                    <i data-lucide="calendar-clock"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>EscalaJa</h1>
+                    <small>Advanced Scheduling System</small>
+                </div>
+            </a>
+
+            <!-- Desktop Navigation -->
+            <div class="nav-menu">
+                <div class="nav-item">
+                    <a href="{% url 'escala:dashboard' %}" class="nav-link">
+                        <i data-lucide="gauge"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </div>
+
+                <div class="nav-item">
+                    <a href="{% url 'escala:calendario' %}" class="nav-link">
+                        <i data-lucide="calendar"></i>
+                        <span>Calendário</span>
+                    </a>
+                </div>
+                
+                <!-- Dropdown Escalas -->
+                <div class="dropdown" id="dropdownEscalas">
+                    <button class="dropdown-toggle" onclick="toggleDropdown('dropdownEscalas')">
+                        <i data-lucide="clipboard-list"></i>
+                        <span>Escalas</span>
+                        <i data-lucide="chevron-down" class="dropdown-arrow"></i>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a href="{% url 'escala:escala_lista' %}" class="dropdown-item">
+                            <i data-lucide="folder-open"></i>
+                            <span>Ver Escalas</span>
+                        </a>
+                        <a href="{% url 'escala:gerar_escala' %}" class="dropdown-item">
+                            <i data-lucide="sparkles"></i>
+                            <span>Gerar Nova</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Dropdown Gestão -->
+                <div class="dropdown" id="dropdownGestao">
+                    <button class="dropdown-toggle" onclick="toggleDropdown('dropdownGestao')">
+                        <i data-lucide="users"></i>
+                        <span>Gestão</span>
+                        <i data-lucide="chevron-down" class="dropdown-arrow"></i>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a href="{% url 'escala:funcionario_lista' %}" class="dropdown-item">
+                            <i data-lucide="user-check"></i>
+                            <span>Funcionários</span>
+                        </a>
+                        <a href="{% url 'escala:feriado_lista' %}" class="dropdown-item">
+                            <i data-lucide="party-popper"></i>
+                            <span>Feriados</span>
+                        </a>
+                        <a href="{% url 'escala:turno_lista' %}" class="dropdown-item">
+                            <i data-lucide="clock"></i>
+                            <span>Turnos</span>
+                        </a>
+                        <a href="{% url 'escala:grupo_lista' %}" class="dropdown-item">
+                            <i data-lucide="layers"></i>
+                            <span>Grupos/Setores</span>
+                        </a>
+                        <a href="{% url 'escala:configuracao' %}" class="dropdown-item">
+                            <i data-lucide="settings-2"></i>
+                            <span>Configurações</span>
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- User Menu -->
+            <div class="user-menu">
+                {% if user.is_authenticated %}
+                <div class="dropdown" id="dropdownUser">
+                    <button class="dropdown-toggle" onclick="toggleDropdown('dropdownUser')">
+                        <div class="user-avatar">{{ user.username|slice:":1"|upper }}</div>
+                        <span class="dropdown-text">{{ user.username }}</span>
+                        <i data-lucide="chevron-down" class="dropdown-arrow"></i>
+                    </button>
+                    <div class="dropdown-menu">
+                        <div class="dropdown-item" style="pointer-events: none; opacity: 0.7;">
+                            <i data-lucide="user"></i>
+                            <span>{{ user.get_full_name|default:user.username }}</span>
+                        </div>
+                        
+                        <div class="dropdown-divider"></div>
+                        <a href="{% url 'escala:logout' %}" class="dropdown-item logout">
+                            <i data-lucide="log-out"></i>
+                            <span>Sair</span>
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Mobile Menu Button -->
+                <button class="mobile-menu-btn" onclick="toggleMobileSidebar()">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile Sidebar -->
+    <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
+    <div class="mobile-sidebar" id="mobileSidebar">
+        <div class="sidebar-header">
+            <div class="navbar-brand">
+                <div class="logo-icon">
+                    <i data-lucide="calendar-clock"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>EscalaJa</h1>
+                </div>
+            </div>
+            <button class="sidebar-close" onclick="closeMobileSidebar()">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+
+        <div class="sidebar-nav">
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Principal</div>
+                <a href="{% url 'escala:dashboard' %}" class="sidebar-link">
+                    <i data-lucide="gauge"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{% url 'escala:calendario' %}" class="sidebar-link">
+                    <i data-lucide="calendar"></i>
+                    <span>Calendário</span>
+                </a>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Escalas</div>
+                <a href="{% url 'escala:escala_lista' %}" class="sidebar-link">
+                    <i data-lucide="folder-open"></i>
+                    <span>Ver Escalas</span>
+                </a>
+                <a href="{% url 'escala:gerar_escala' %}" class="sidebar-link">
+                    <i data-lucide="sparkles"></i>
+                    <span>Gerar Nova Escala</span>
+                </a>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Gestão</div>
+                <a href="{% url 'escala:funcionario_lista' %}" class="sidebar-link">
+                    <i data-lucide="user-check"></i>
+                    <span>Funcionários</span>
+                </a>
+                <a href="{% url 'escala:feriado_lista' %}" class="sidebar-link">
+                    <i data-lucide="party-popper"></i>
+                    <span>Feriados</span>
+                </a>
+                <a href="{% url 'escala:turno_lista' %}" class="sidebar-link">
+                    <i data-lucide="clock"></i>
+                    <span>Turnos</span>
+                </a>
+                <a href="{% url 'escala:grupo_lista' %}" class="sidebar-link">
+                    <i data-lucide="layers"></i>
+                    <span>Grupos/Setores</span>
+                </a>
+                <a href="{% url 'escala:configuracao' %}" class="sidebar-link">
+                    <i data-lucide="settings-2"></i>
+                    <span>Configurações</span>
+                </a>
+            </div>
+
+
+            {% if user.is_authenticated %}
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Usuário</div>
+                <a href="/admin/" class="sidebar-link" target="_blank">
+                    <i data-lucide="settings"></i>
+                    <span>Admin Panel</span>
+                </a>
+                <a href="{% url 'escala:logout' %}" class="sidebar-link" style="color: #f87171;">
+                    <i data-lucide="log-out"></i>
+                    <span>Sair ({{ user.username }})</span>
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Content Wrapper -->
+    <div class="content-wrapper">
+        <div class="container">
+            {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                <div class="message {{ message.tags }}">{{ message|safe }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="footer">
+        <p>cod.dev.br by william charlier cardia</p>
+    </footer>
+    
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Dropdown Toggle
+        function toggleDropdown(id) {
+            const dropdown = document.getElementById(id);
+            const allDropdowns = document.querySelectorAll('.dropdown');
+            
+            allDropdowns.forEach(d => {
+                if (d.id !== id) {
+                    d.classList.remove('active');
+                }
+            });
+            
+            dropdown.classList.toggle('active');
+        }
+
+        // Mobile Sidebar
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('mobileSidebar');
+            const overlay = document.getElementById('mobileOverlay');
+            
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+            
+            if (sidebar.classList.contains('active')) {
+                document.body.style.overflow = 'hidden';
+            } else {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function closeMobileSidebar() {
+            document.getElementById('mobileSidebar').classList.remove('active');
+            document.getElementById('mobileOverlay').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.dropdown')) {
+                document.querySelectorAll('.dropdown').forEach(d => {
+                    d.classList.remove('active');
+                });
+            }
+        });
+
+        // Close mobile sidebar when clicking on link
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            link.addEventListener('click', closeMobileSidebar);
+        });
+
+        // Re-initialize Lucide icons after dynamic content loads
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+{% extends 'escala/base.html' %}
+{% block title %}Dashboard - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>📊 Dashboard</h2>
+
+<style>
+/* Layout em Grid - Mantendo a ordem natural */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+/* Container do turno atual (Azul) */
+.turno-atual-container {
+  position: relative;
+  background: linear-gradient(135deg, #1e293b, #334155);
+  color: white;
+  border-radius: 12px;
+  padding: 24px;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+  overflow: visible;
+}
+
+/* Cards Laterais (Brancos) */
+.card-lateral-branco {
+  background: #ffffff !important;
+  border: 2px solid #e5e7eb !important;
+  color: #1e293b !important;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.label-lateral {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.tag-funcionario-lateral {
+  background: #f1f5f9 !important;
+  color: #334155 !important;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #e2e8f0;
+}
+
+/* Responsividade Corrigida (Mantendo a ordem original) */
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Coluna única no celular */
+  }
+}
+</style>
+
+<div class="dashboard-grid">
+
+  <div class="card-lateral-branco">
+    <div class="label-lateral">Anterior</div>
+    {% if turno_anterior %}
+      <div style="font-size:28px;font-weight:700;color:#0f172a;">{{ turno_anterior.nome }}</div>
+      <div style="color:#475569;">{{ turno_anterior.horario_entrada|time:"H:i" }} – {{ turno_anterior.horario_saida|time:"H:i" }}</div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:15px;">
+        {% for dia in funcionarios_turno_anterior %}
+          <span class="tag-funcionario-lateral">{{ dia.funcionario.nome }}</span>
+        {% empty %}
+          <span style="opacity:.5;font-size:12px;">Sem registros</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="opacity:.5;">Sem dados</div>
+    {% endif %}
+  </div>
+
+  <div class="turno-atual-container">
+    <div class="turno-content">
+      <div style="font-size:11px;text-transform:uppercase;opacity:.7;font-weight:600;">Agora</div>
+      {% if turno_atual %}
+        <div style="font-size:28px;font-weight:700;">{{ turno_atual.nome }}</div>
+        <div style="opacity:.8;margin-bottom:20px;">
+          {{ turno_atual.horario_entrada|time:"H:i" }} – {{ turno_atual.horario_saida|time:"H:i" }}
+        </div>
+
+        <div id="barra-wrapper"
+             data-entrada="{{ turno_atual.horario_entrada|time:'H:i' }}"
+             data-saida="{{ turno_atual.horario_saida|time:'H:i' }}"
+             style="position:relative;width:100%;height:70px;background:rgba(0,0,0,.3);border-radius:8px;margin-bottom:20px;overflow:visible;">
+
+          <div id="barra-progresso"
+               style="position:absolute;left:0;top:20px;height:30px;width:0%;background:linear-gradient(to right,#10b981,#22d3ee);border-radius:8px;box-shadow:0 0 15px rgba(16,185,129,.6);transition:width 0.5s ease;">
+          </div>
+        </div>
+
+        <div style="font-size:13px;opacity:.9;margin-bottom:15px;background:rgba(0,0,0,.2);padding:8px 12px;border-radius:8px;display:inline-block;">
+          ⏳ Termina em: <strong id="contador-restante">{{ tempo_restante }}</strong>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          {% for dia in funcionarios_turno_atual %}
+            <span style="background:rgba(255,255,255,.15);padding:6px 14px;border-radius:20px;font-size:12px;">
+              {{ dia.funcionario.nome }}
+            </span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div style="opacity:.5;">Nenhum turno ativo</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card-lateral-branco">
+    <div class="label-lateral">Próximo</div>
+    {% if turno_proximo %}
+      <div style="font-size:28px;font-weight:700;color:#0f172a;">{{ turno_proximo.nome }}</div>
+      <div style="color:#475569;">{{ turno_proximo.horario_entrada|time:"H:i" }} – {{ turno_proximo.horario_saida|time:"H:i" }}</div>
+
+      <div style="margin-top:12px;margin-bottom:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:8px 12px;border-radius:8px;display:inline-block;">
+        🕐 Começa em: <strong id="contador-proximo">{{ tempo_para_proximo }}</strong>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+        {% for dia in funcionarios_turno_proximo %}
+          <span class="tag-funcionario-lateral">{{ dia.funcionario.nome }}</span>
+        {% empty %}
+          <span style="opacity:.5;font-size:12px;">Sem escala</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="opacity:.5;">Sem dados</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const wrapper = document.getElementById('barra-wrapper');
+        const progressoBarra = document.getElementById('barra-progresso');
+        const elRestante = document.getElementById('contador-restante');
+        const elProximo = document.getElementById('contador-proximo');
+
+        function formatarTempo(segundos) {
+            if (segundos <= 0) return '00:00';
+            const h = Math.floor(segundos / 3600);
+            const m = Math.floor((segundos % 3600) / 60);
+            return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+        }
+
+        if (wrapper && progressoBarra) {
+            const entradaStr = wrapper.dataset.entrada;
+            const saidaStr = wrapper.dataset.saida;
+
+            function parseDT(hhmm, referencia) {
+                const [h, m] = hhmm.split(':').map(Number);
+                const d = new Date(referencia);
+                d.setHours(h, m, 0, 0);
+                return d;
+            }
+
+            const agora0 = new Date();
+            let entrada = parseDT(entradaStr, agora0);
+            let saida   = parseDT(saidaStr,   agora0);
+
+            if (saida <= entrada) {
+                if (agora0.getHours() < 12) entrada.setDate(entrada.getDate() - 1);
+                else saida.setDate(saida.getDate() + 1);
+            }
+
+            const fimMs = saida.getTime();
+            const duracaoTotal = saida.getTime() - entrada.getTime();
+
+            function tick() {
+                const agora = new Date();
+                const restanteMs = Math.max(0, fimMs - agora.getTime());
+                const restanteSeg = Math.floor(restanteMs / 1000);
+
+                // Barra de progresso
+                const decorrido = agora.getTime() - entrada.getTime();
+                const pct = Math.max(0, Math.min(100, (decorrido / duracaoTotal) * 100));
+                progressoBarra.style.width = pct.toFixed(2) + '%';
+
+                // Contador atual
+                if (elRestante) elRestante.textContent = formatarTempo(restanteSeg);
+
+                // Contador próximo (mesmo valor — próximo começa quando atual termina)
+                if (elProximo) elProximo.textContent = formatarTempo(restanteSeg);
+            }
+
+            tick();
+            setInterval(tick, 1000);
+        }
+    });
+</script>
+
+{% endblock %}

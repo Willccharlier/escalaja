@@ -1,0 +1,437 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}
+    {% if funcionario %}
+        Editar Funcionário - EscalaJa
+    {% else %}
+        Novo Funcionário - EscalaJa
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<h2>
+    {% if funcionario %}
+        ✏️ Editar Funcionário
+    {% else %}
+        ➕ Cadastrar Novo Funcionário
+    {% endif %}
+</h2>
+
+<style>
+    .form-container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .form-group.full-width {
+        grid-column: 1 / -1;
+    }
+    
+    .form-label {
+        font-weight: 600;
+        color: #2c3e50;
+        margin-bottom: 8px;
+        font-size: 14px;
+    }
+    
+    .form-label .required {
+        color: #e74c3c;
+        margin-left: 4px;
+    }
+    
+    .form-input,
+    .form-select {
+        padding: 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-size: 14px;
+        transition: all 0.3s;
+        font-family: Arial, sans-serif;
+    }
+    
+    .form-input:focus,
+    .form-select:focus {
+        outline: none;
+        border-color: #3498db;
+        box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+    
+    .form-input:invalid {
+        border-color: #e74c3c;
+    }
+    
+    .form-help {
+        font-size: 12px;
+        color: #666;
+        margin-top: 4px;
+        font-style: italic;
+    }
+    
+    .form-checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+    }
+    
+    .form-checkbox {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+    }
+    
+    .form-checkbox-label {
+        font-size: 14px;
+        color: #2c3e50;
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 2px solid #f0f0f0;
+    }
+    
+    .info-box {
+        background: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 25px;
+    }
+    
+    .info-box-title {
+        font-weight: 600;
+        color: #1976d2;
+        margin-bottom: 5px;
+    }
+    
+    .info-box-text {
+        font-size: 13px;
+        color: #0d47a1;
+        line-height: 1.5;
+    }
+    
+    @media (max-width: 768px) {
+        .form-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<div class="form-container">
+    {% if funcionario %}
+    <div class="info-box">
+        <div class="info-box-title">ℹ️ Editando Funcionário</div>
+        <div class="info-box-text">
+            Você está editando os dados de <strong>{{ funcionario.nome }}</strong>.
+            Alterações afetarão escalas futuras, mas não modificarão escalas já geradas.
+        </div>
+    </div>
+    {% else %}
+    <div class="info-box">
+        <div class="info-box-title">ℹ️ Cadastro de Novo Funcionário</div>
+        <div class="info-box-text">
+            Preencha todos os campos obrigatórios. O funcionário deve ter no mínimo 18 anos na data de admissão.
+        </div>
+    </div>
+    {% endif %}
+    
+    <form method="POST">
+        {% csrf_token %}
+        
+        <div class="form-grid">
+            <!-- Nome Completo -->
+            <div class="form-group full-width">
+                <label class="form-label">
+                    Nome Completo
+                    <span class="required">*</span>
+                </label>
+                <input 
+                    type="text" 
+                    name="nome" 
+                    class="form-input" 
+                    value="{{ funcionario.nome|default:'' }}"
+                    required
+                    maxlength="200"
+                    placeholder="Ex: João da Silva Santos"
+                >
+            </div>
+            
+            <!-- Data de Nascimento -->
+            <div class="form-group">
+                <label class="form-label">
+                    Data de Nascimento
+                    <span class="required">*</span>
+                </label>
+                <input 
+                    type="date" 
+                    name="data_nascimento" 
+                    class="form-input"
+                    value="{{ funcionario.data_nascimento|date:'Y-m-d'|default:'' }}"
+                    required
+                    max="{{ hoje|date:'Y-m-d' }}"
+                >
+                <span class="form-help">Necessário para folga de aniversário</span>
+            </div>
+            
+            <!-- Data de Admissão -->
+            <div class="form-group">
+                <label class="form-label">
+                    Data de Admissão
+                    <span class="required">*</span>
+                </label>
+                <input 
+                    type="date" 
+                    name="data_admissao" 
+                    class="form-input"
+                    value="{{ funcionario.data_admissao|date:'Y-m-d'|default:'' }}"
+                    required
+                >
+                <span class="form-help">Data de início na empresa</span>
+            </div>
+            
+            <!-- Tipo de Funcionário -->
+            <div class="form-group">
+                <label class="form-label">
+                    Tipo de Funcionário
+                    <span class="required">*</span>
+                </label>
+                <select name="tipo" class="form-select" required>
+                    <option value="">Selecione...</option>
+                    <option value="REGULAR" {% if funcionario.tipo == 'REGULAR' %}selected{% endif %}>
+                        Regular - Trabalha na escala normal
+                    </option>
+                    <option value="FOLGUISTA" {% if funcionario.tipo == 'FOLGUISTA' %}selected{% endif %}>
+                        Folguista - Entra apenas quando necessário
+                    </option>
+                </select>
+                <span class="form-help">Regulares entram na escala automática</span>
+            </div>
+            
+            <!-- Turno (só Regular) -->
+            <div class="form-group" id="campo_turno_fixo">
+                <label class="form-label">Turno Fixo <span class="required">*</span></label>
+                <select name="turno" class="form-select" id="select_turno">
+                    <option value="">Selecione...</option>
+                    {% for turno in turnos %}
+                    <option value="{{ turno.id }}" {% if funcionario.turno.id == turno.id %}selected{% endif %}>
+                        {{ turno.nome }} ({{ turno.horario_entrada|time:"H:i" }} - {{ turno.horario_saida|time:"H:i" }})
+                    </option>
+                    {% endfor %}
+                </select>
+                <span class="form-help">Turno fixo do funcionário Regular</span>
+            </div>
+
+            <!-- Grupo principal -->
+            <div class="form-group">
+                <label class="form-label">Grupo / Setor</label>
+                <select name="grupo" class="form-select">
+                    <option value="">— Sem grupo —</option>
+                    {% for g in grupos %}
+                    <option value="{{ g.id }}" {% if funcionario.grupo.id == g.id %}selected{% endif %}>{{ g.nome }}</option>
+                    {% endfor %}
+                </select>
+                <span class="form-help">Setor principal do funcionário</span>
+            </div>
+
+            <!-- Turnos habilitados (só Folguista) -->
+            <div class="form-group full-width" id="campo_turnos_habilitados" style="display:none;">
+                <label class="form-label">Turnos que pode cobrir <span class="required">*</span></label>
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;">
+                    {% for turno in turnos %}
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:#f8fafc;border:1px solid #e2e8f0;padding:8px 14px;border-radius:8px;">
+                        <input type="checkbox" name="turnos_habilitados" value="{{ turno.id }}"
+                            {% if turno.id in turnos_habilitados_ids %}checked{% endif %}>
+                        <span>
+                            <strong>{{ turno.nome }}</strong>
+                            <span style="font-size:11px;color:#64748b;margin-left:4px;">{{ turno.horario_entrada|time:"H:i" }}–{{ turno.horario_saida|time:"H:i" }}</span>
+                        </span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <span class="form-help">Selecione todos os turnos que este folguista pode cobrir</span>
+            </div>
+
+            <!-- Grupos habilitados (só Folguista) -->
+            <div class="form-group full-width" id="campo_grupos_habilitados" style="display:none;">
+                <label class="form-label">Setores que pode cobrir</label>
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;">
+                    {% for g in grupos %}
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:#f8fafc;border:1px solid #e2e8f0;padding:8px 14px;border-radius:8px;">
+                        <input type="checkbox" name="grupos_habilitados" value="{{ g.id }}"
+                            {% if g.id in grupos_habilitados_ids %}checked{% endif %}>
+                        <strong style="color:#0f172a;font-size:14px;">{{ g.nome }}</strong>
+                    </label>
+                    {% endfor %}
+                </div>
+                <span class="form-help">Setores que este folguista está habilitado a trabalhar</span>
+            </div>
+            
+            <!-- Folga Fixa -->
+            <div class="form-group full-width" id="folga_fixa_group">
+                <label class="form-label">Dia Fixo de Folga</label>
+                <select name="folga_fixa_dia" class="form-select" id="folga_fixa_dia">
+                    <option value="">— Sem preferência (aleatório) —</option>
+                    <option value="0" {% if funcionario.folga_fixa_dia == 0 %}selected{% endif %}>Segunda-feira</option>
+                    <option value="1" {% if funcionario.folga_fixa_dia == 1 %}selected{% endif %}>Terça-feira</option>
+                    <option value="2" {% if funcionario.folga_fixa_dia == 2 %}selected{% endif %}>Quarta-feira</option>
+                    <option value="3" {% if funcionario.folga_fixa_dia == 3 %}selected{% endif %}>Quinta-feira</option>
+                    <option value="4" {% if funcionario.folga_fixa_dia == 4 %}selected{% endif %}>Sexta-feira</option>
+                    <option value="5" {% if funcionario.folga_fixa_dia == 5 %}selected{% endif %}>Sábado</option>
+                    <option value="6" {% if funcionario.folga_fixa_dia == 6 %}selected{% endif %}>Domingo</option>
+                </select>
+                <span class="form-help" id="folga_fixa_help">
+                    6x1: folga sempre neste dia | 5x2: folga neste dia + o seguinte
+                </span>
+            </div>
+
+            <!-- Regime -->
+            <div class="form-group full-width">
+                <label class="form-label">
+                    Regime de Trabalho
+                    <span class="required">*</span>
+                </label>
+                <select name="regime" class="form-select" required>
+                    <option value="5x2" {% if not funcionario or funcionario.regime == '5x2' %}selected{% endif %}>
+                        5x2 — trabalha 5, folga 2 por semana (RECEPÇÃO)
+                    </option>
+                    <option value="6x1" {% if funcionario.regime == '6x1' %}selected{% endif %}>
+                        6x1 — trabalha 6, folga 1 por semana
+                    </option>
+                </select>
+                <span class="form-help">Define quantas folgas por semana o funcionário tem direito</span>
+            </div>
+
+            <!-- Férias -->
+            <div class="form-group">
+                <label class="form-label">Férias — Início</label>
+                <input
+                    type="date"
+                    name="ferias_inicio"
+                    class="form-input"
+                    value="{{ funcionario.ferias_inicio|date:'Y-m-d'|default:'' }}"
+                >
+                <span class="form-help">Deixe em branco se não estiver de férias</span>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Férias — Fim</label>
+                <input
+                    type="date"
+                    name="ferias_fim"
+                    class="form-input"
+                    value="{{ funcionario.ferias_fim|date:'Y-m-d'|default:'' }}"
+                >
+            </div>
+
+            {% if funcionario %}
+            <!-- Status (apenas na edição) -->
+            <div class="form-group full-width">
+                <div class="form-checkbox-group">
+                    <input
+                        type="checkbox"
+                        name="ativo"
+                        id="ativo"
+                        class="form-checkbox"
+                        {% if funcionario.ativo %}checked{% endif %}
+                    >
+                    <label for="ativo" class="form-checkbox-label">
+                        ✅ Funcionário ativo (participará das escalas)
+                    </label>
+                </div>
+                <span class="form-help" style="margin-left: 12px;">
+                    Desmarque para inativar sem remover do sistema
+                </span>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="form-actions">
+            <button type="submit" class="btn btn-success">
+                {% if funcionario %}
+                    💾 Salvar Alterações
+                {% else %}
+                    ➕ Cadastrar Funcionário
+                {% endif %}
+            </button>
+            <a href="{% url 'escala:funcionario_lista' %}" class="btn">
+                ❌ Cancelar
+            </a>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dataNasc = document.querySelector('input[name="data_nascimento"]');
+    const dataAdm = document.querySelector('input[name="data_admissao"]');
+    
+    // Validar idade mínima de 18 anos na admissão
+    function validarIdade() {
+        if (!dataNasc.value || !dataAdm.value) return;
+        
+        const nasc = new Date(dataNasc.value);
+        const adm = new Date(dataAdm.value);
+        
+        let idade = adm.getFullYear() - nasc.getFullYear();
+        const m = adm.getMonth() - nasc.getMonth();
+        
+        if (m < 0 || (m === 0 && adm.getDate() < nasc.getDate())) {
+            idade--;
+        }
+        
+        if (idade < 18) {
+            alert('⚠️ Atenção: O funcionário deve ter no mínimo 18 anos na data de admissão!');
+            dataAdm.value = '';
+        }
+    }
+    
+    dataNasc.addEventListener('change', validarIdade);
+    dataAdm.addEventListener('change', validarIdade);
+
+    // Toggle campos Regular x Folguista
+    const selectTipo = document.querySelector('select[name="tipo"]');
+    const campoTurnoFixo = document.getElementById('campo_turno_fixo');
+    const selectTurno = document.getElementById('select_turno');
+    const campoTurnosHab = document.getElementById('campo_turnos_habilitados');
+    const campoGruposHab = document.getElementById('campo_grupos_habilitados');
+
+    function atualizarCamposTipo() {
+        const isFolguista = selectTipo.value === 'FOLGUISTA';
+        campoTurnoFixo.style.display = isFolguista ? 'none' : '';
+        selectTurno.required = !isFolguista;
+        selectTurno.disabled = isFolguista;   // não envia no POST quando folguista
+        campoTurnosHab.style.display = isFolguista ? '' : 'none';
+        campoGruposHab.style.display = isFolguista ? '' : 'none';
+    }
+
+    if (selectTipo) {
+        selectTipo.addEventListener('change', atualizarCamposTipo);
+        atualizarCamposTipo();
+    }
+});
+</script>
+
+{% endblock %}

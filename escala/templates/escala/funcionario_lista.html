@@ -1,0 +1,335 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Funcionários - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>👥 Gerenciar Funcionários</h2>
+
+<div style="margin: 20px 0;">
+    <a href="{% url 'escala:funcionario_novo' %}" class="btn btn-success">➕ Cadastrar Novo Funcionário</a>
+    <a href="{% url 'escala:dashboard' %}" class="btn">← Voltar ao Dashboard</a>
+</div>
+
+<style>
+    .funcionario-card {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .funcionario-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #f0f0f0;
+    }
+    
+    .funcionario-nome {
+        font-size: 18px;
+        font-weight: bold;
+        color: #2c3e50;
+    }
+    
+    .funcionario-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 10px;
+    }
+    
+    .badge-regular {
+        background: #d4edda;
+        color: #155724;
+    }
+    
+    .badge-folguista {
+        background: #d1ecf1;
+        color: #0c5460;
+    }
+    
+    .badge-inativo {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .funcionario-info {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .info-item {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .info-label {
+        font-size: 11px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    
+    .info-value {
+        font-size: 14px;
+        color: #2c3e50;
+        font-weight: 500;
+    }
+    
+    .funcionario-actions {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .btn-small {
+        padding: 6px 12px;
+        font-size: 13px;
+        border-radius: 4px;
+        text-decoration: none;
+        display: inline-block;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-edit {
+        background: #3498db;
+        color: white;
+    }
+    
+    .btn-edit:hover {
+        background: #2980b9;
+        transform: translateY(-1px);
+    }
+    
+    .btn-delete {
+        background: #e74c3c;
+        color: white;
+    }
+    
+    .btn-delete:hover {
+        background: #c0392b;
+        transform: translateY(-1px);
+    }
+    
+    .turno-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    
+    .turno-manha {
+        background: #fff3cd;
+        color: #856404;
+    }
+    
+    .turno-tarde {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .turno-noite {
+        background: #d6d8db;
+        color: #383d41;
+    }
+    
+    .section-title {
+        font-size: 20px;
+        font-weight: bold;
+        color: #2c3e50;
+        margin: 30px 0 15px 0;
+        padding-bottom: 10px;
+        border-bottom: 3px solid #3498db;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+        font-style: italic;
+    }
+</style>
+
+<!-- FUNCIONÁRIOS REGULARES -->
+<div class="section-title">
+    👔 Funcionários Regulares ({{ regulares.count }})
+</div>
+
+{% if regulares %}
+    {% for func in regulares %}
+    <div class="funcionario-card">
+        <div class="funcionario-header">
+            <div>
+                <span class="funcionario-nome">{{ func.nome }}</span>
+                <span class="funcionario-badge badge-regular">Regular</span>
+                <span class="turno-badge turno-{{ func.turno.nome|lower }}">
+                    {{ func.turno.nome }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="funcionario-info">
+            <div class="info-item">
+                <span class="info-label">Data de Nascimento</span>
+                <span class="info-value">{{ func.data_nascimento|date:"d/m/Y" }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Data de Admissão</span>
+                <span class="info-value">{{ func.data_admissao|date:"d/m/Y" }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Turno</span>
+                <span class="info-value">
+                    {{ func.turno.horario_entrada|time:"H:i" }} - {{ func.turno.horario_saida|time:"H:i" }}
+                </span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Status</span>
+                <span class="info-value">✅ Ativo</span>
+            </div>
+        </div>
+        
+        <div class="funcionario-actions">
+            <a href="{% url 'escala:funcionario_editar' func.pk %}" class="btn-small btn-edit">
+                ✏️ Editar
+            </a>
+            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}" 
+                  style="display: inline;"
+                  onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn-small btn-delete">🗑️ Remover</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        Nenhum funcionário regular cadastrado.
+    </div>
+{% endif %}
+
+<!-- FOLGUISTAS -->
+<div class="section-title">
+    🔄 Folguistas ({{ folguistas.count }})
+</div>
+
+{% if folguistas %}
+    {% for func in folguistas %}
+    <div class="funcionario-card">
+        <div class="funcionario-header">
+            <div>
+                <span class="funcionario-nome">{{ func.nome }}</span>
+                <span class="funcionario-badge badge-folguista">Folguista</span>
+                <span class="turno-badge turno-{{ func.turno.nome|lower }}">
+                    {{ func.turno.nome }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="funcionario-info">
+            <div class="info-item">
+                <span class="info-label">Data de Nascimento</span>
+                <span class="info-value">{{ func.data_nascimento|date:"d/m/Y" }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Data de Admissão</span>
+                <span class="info-value">{{ func.data_admissao|date:"d/m/Y" }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Turno</span>
+                <span class="info-value">
+                    {{ func.turno.horario_entrada|time:"H:i" }} - {{ func.turno.horario_saida|time:"H:i" }}
+                </span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">Status</span>
+                <span class="info-value">✅ Ativo</span>
+            </div>
+        </div>
+        
+        <div class="funcionario-actions">
+            <a href="{% url 'escala:funcionario_editar' func.pk %}" class="btn-small btn-edit">
+                ✏️ Editar
+            </a>
+            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}" 
+                  style="display: inline;"
+                  onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn-small btn-delete">🗑️ Remover</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        Nenhum folguista cadastrado.
+    </div>
+{% endif %}
+
+<!-- INATIVOS -->
+{% if inativos %}
+<div class="section-title">
+    ⏸️ Funcionários Inativos ({{ inativos.count }})
+</div>
+
+{% for func in inativos %}
+<div class="funcionario-card" style="opacity: 0.7;">
+    <div class="funcionario-header">
+        <div>
+            <span class="funcionario-nome">{{ func.nome }}</span>
+            <span class="funcionario-badge badge-inativo">Inativo</span>
+            <span class="turno-badge turno-{{ func.turno.nome|lower }}">
+                {{ func.turno.nome }}
+            </span>
+        </div>
+    </div>
+    
+    <div class="funcionario-info">
+        <div class="info-item">
+            <span class="info-label">Tipo</span>
+            <span class="info-value">{{ func.get_tipo_display }}</span>
+        </div>
+        
+        <div class="info-item">
+            <span class="info-label">Data de Admissão</span>
+            <span class="info-value">{{ func.data_admissao|date:"d/m/Y" }}</span>
+        </div>
+        
+        <div class="info-item">
+            <span class="info-label">Status</span>
+            <span class="info-value">❌ Inativo</span>
+        </div>
+    </div>
+    
+    <div class="funcionario-actions">
+        <a href="{% url 'escala:funcionario_editar' func.pk %}" class="btn-small btn-edit">
+            ✏️ Reativar/Editar
+        </a>
+        <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}" 
+              style="display: inline;"
+              onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
+            {% csrf_token %}
+            <button type="submit" class="btn-small btn-delete">🗑️ Remover</button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

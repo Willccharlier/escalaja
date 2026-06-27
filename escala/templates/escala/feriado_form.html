@@ -1,0 +1,287 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}
+    {% if feriado %}Editar Feriado{% else %}Novo Feriado{% endif %} - EscalaJa
+{% endblock %}
+
+{% block content %}
+<h2>
+    {% if feriado %}
+        ✏️ Editar Feriado
+    {% else %}
+        ➕ Cadastrar Novo Feriado
+    {% endif %}
+</h2>
+
+<style>
+.form-container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.form-label .required {
+    color: #e74c3c;
+    margin-left: 4px;
+}
+
+.form-input,
+.form-select {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.3s;
+    font-family: inherit;
+}
+
+.form-input:focus,
+.form-select:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.form-help {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid #f0f0f0;
+}
+
+.info-box {
+    background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    padding: 15px;
+    border-radius: 4px;
+    margin-bottom: 25px;
+}
+
+.info-box-title {
+    font-weight: 600;
+    color: #1976d2;
+    margin-bottom: 5px;
+}
+
+.info-box-text {
+    font-size: 13px;
+    color: #0d47a1;
+    line-height: 1.5;
+}
+
+.tipo-opcao {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.tipo-opcao:hover {
+    border-color: #3498db;
+    background: #f8f9fa;
+}
+
+.tipo-opcao input[type="radio"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.tipo-opcao.selected {
+    border-color: #3498db;
+    background: #e3f2fd;
+}
+
+.tipo-icon {
+    font-size: 24px;
+}
+
+.tipo-info {
+    flex: 1;
+}
+
+.tipo-titulo {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.tipo-desc {
+    font-size: 12px;
+    color: #666;
+}
+</style>
+
+<div class="form-container">
+    {% if feriado %}
+    <div class="info-box">
+        <div class="info-box-title">ℹ️ Editando Feriado</div>
+        <div class="info-box-text">
+            Você está editando <strong>{{ feriado.nome }}</strong>.
+            Alterações não afetarão escalas já geradas.
+        </div>
+    </div>
+    {% else %}
+    <div class="info-box">
+        <div class="info-box-title">ℹ️ Cadastro de Feriado</div>
+        <div class="info-box-text">
+            Feriados cadastrados serão automaticamente considerados na geração de escalas.
+            O sistema identifica se o feriado cai em dia útil.
+        </div>
+    </div>
+    {% endif %}
+    
+    <form method="POST">
+        {% csrf_token %}
+        
+        <!-- Nome do Feriado -->
+        <div class="form-group">
+            <label class="form-label">
+                Nome do Feriado
+                <span class="required">*</span>
+            </label>
+            <input 
+                type="text" 
+                name="nome" 
+                class="form-input"
+                value="{{ feriado.nome|default:'' }}"
+                required
+                maxlength="100"
+                placeholder="Ex: Natal, Ano Novo, Carnaval..."
+            >
+            <span class="form-help">Nome completo do feriado</span>
+        </div>
+        
+        <!-- Data -->
+        <div class="form-group">
+            <label class="form-label">
+                Data
+                <span class="required">*</span>
+            </label>
+            <input 
+                type="date" 
+                name="data" 
+                class="form-input"
+                value="{{ feriado.data|date:'Y-m-d'|default:'' }}"
+                required
+            >
+            <span class="form-help">O sistema identificará automaticamente se é dia útil</span>
+        </div>
+        
+        <!-- Tipo -->
+        <div class="form-group">
+            <label class="form-label">
+                Tipo de Feriado
+                <span class="required">*</span>
+            </label>
+            
+            <div class="tipo-opcao {% if not feriado or feriado.tipo == 'NACIONAL' %}selected{% endif %}">
+                <input 
+                    type="radio" 
+                    name="tipo" 
+                    value="NACIONAL"
+                    id="tipo-nacional"
+                    {% if not feriado or feriado.tipo == 'NACIONAL' %}checked{% endif %}
+                    required
+                >
+                <span class="tipo-icon">🇧🇷</span>
+                <div class="tipo-info">
+                    <div class="tipo-titulo">Nacional</div>
+                    <div class="tipo-desc">Feriado em todo o Brasil</div>
+                </div>
+            </div>
+            
+            <div class="tipo-opcao {% if feriado.tipo == 'ESTADUAL' %}selected{% endif %}">
+                <input 
+                    type="radio" 
+                    name="tipo" 
+                    value="ESTADUAL"
+                    id="tipo-estadual"
+                    {% if feriado.tipo == 'ESTADUAL' %}checked{% endif %}
+                >
+                <span class="tipo-icon">📍</span>
+                <div class="tipo-info">
+                    <div class="tipo-titulo">Estadual</div>
+                    <div class="tipo-desc">Feriado específico do estado</div>
+                </div>
+            </div>
+            
+            <div class="tipo-opcao {% if feriado.tipo == 'MUNICIPAL' %}selected{% endif %}">
+                <input 
+                    type="radio" 
+                    name="tipo" 
+                    value="MUNICIPAL"
+                    id="tipo-municipal"
+                    {% if feriado.tipo == 'MUNICIPAL' %}checked{% endif %}
+                >
+                <span class="tipo-icon">🏛️</span>
+                <div class="tipo-info">
+                    <div class="tipo-titulo">Municipal</div>
+                    <div class="tipo-desc">Feriado da cidade</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Botões -->
+        <div class="form-actions">
+            <button type="submit" class="btn btn-success">
+                {% if feriado %}
+                    💾 Salvar Alterações
+                {% else %}
+                    ➕ Cadastrar Feriado
+                {% endif %}
+            </button>
+            <a href="{% url 'escala:feriado_lista' %}" class="btn btn-secondary">
+                ❌ Cancelar
+            </a>
+        </div>
+    </form>
+</div>
+
+<script>
+// Atualizar seleção visual dos tipos
+document.querySelectorAll('.tipo-opcao').forEach(opcao => {
+    opcao.addEventListener('click', function() {
+        // Remover selected de todos
+        document.querySelectorAll('.tipo-opcao').forEach(o => {
+            o.classList.remove('selected');
+        });
+        
+        // Adicionar selected no clicado
+        this.classList.add('selected');
+        
+        // Marcar o radio
+        this.querySelector('input[type="radio"]').checked = true;
+    });
+});
+</script>
+
+{% endblock %}

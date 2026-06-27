@@ -1,0 +1,270 @@
+{% extends 'escala/base.html' %}
+
+{% block title %}Turnos - EscalaJa{% endblock %}
+
+{% block content %}
+<h2>🕐 Configurar Turnos</h2>
+
+<div style="margin: 20px 0;">
+    <button onclick="mostrarForm()" class="btn btn-success">➕ Novo Turno</button>
+    <a href="{% url 'escala:dashboard' %}" class="btn btn-secondary">← Voltar</a>
+</div>
+
+<style>
+    .turno-table {
+        width: 100%;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .turno-table th,
+    .turno-table td {
+        padding: 15px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .turno-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        font-size: 14px;
+        text-transform: uppercase;
+        color: #666;
+    }
+    
+    .turno-table tbody tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    
+    .badge-horario {
+        background: #e3f2fd;
+        color: #1976d2;
+    }
+    
+    .badge-minimo {
+        background: #f3e5f5;
+        color: #7b1fa2;
+    }
+    
+    .btn-acao {
+        padding: 6px 12px;
+        font-size: 13px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 5px;
+        transition: all 0.2s;
+    }
+    
+    .btn-editar {
+        background: #3498db;
+        color: white;
+    }
+    
+    .btn-editar:hover {
+        background: #2980b9;
+    }
+    
+    .btn-remover {
+        background: #e74c3c;
+        color: white;
+    }
+    
+    .btn-remover:hover {
+        background: #c0392b;
+    }
+    
+    .form-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .form-modal.show {
+        display: flex;
+    }
+    
+    .form-box {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    
+    .form-title {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #2c3e50;
+    }
+    
+    .form-field {
+        margin-bottom: 15px;
+    }
+    
+    .form-label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 5px;
+        font-size: 14px;
+        color: #2c3e50;
+    }
+    
+    .form-input {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-size: 14px;
+        font-family: inherit;
+    }
+    
+    .form-input:focus {
+        outline: none;
+        border-color: #3498db;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+    }
+</style>
+
+<!-- Tabela de Turnos -->
+<table class="turno-table">
+    <thead>
+        <tr>
+            <th>Nome do Turno</th>
+            <th>Horário</th>
+            <th>Mínimo</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for turno in turnos %}
+        <tr>
+            <td><strong>{{ turno.nome }}</strong></td>
+            <td>
+                <span class="badge badge-horario">
+                    {{ turno.horario_entrada|time:"H:i" }} - {{ turno.horario_saida|time:"H:i" }}
+                </span>
+            </td>
+            <td>
+                <span class="badge badge-minimo">{{ turno.minimo_funcionarios }} funcionários</span>
+            </td>
+            <td>
+                <button onclick="editarTurno({{ turno.id }}, '{{ turno.nome }}', '{{ turno.horario_entrada|time:"H:i" }}', '{{ turno.horario_saida|time:"H:i" }}', {{ turno.minimo_funcionarios }})" class="btn-acao btn-editar">
+                    ✏️ Editar
+                </button>
+                <form method="POST" action="{% url 'escala:turno_deletar' turno.pk %}" style="display: inline;"
+                      onsubmit="return confirm('Remover turno {{ turno.nome }}?');">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-acao btn-remover">🗑️ Remover</button>
+                </form>
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4" style="text-align: center; padding: 40px; color: #666;">
+                Nenhum turno cadastrado. Clique em "Novo Turno" para começar.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Modal de Formulário -->
+<div id="formModal" class="form-modal">
+    <div class="form-box">
+        <h3 class="form-title" id="formTitle">Novo Turno</h3>
+        
+        <form method="POST" id="turnoForm" action="{% url 'escala:turno_novo' %}">
+            {% csrf_token %}
+            <input type="hidden" name="turno_id" id="turnoId">
+            
+            <div class="form-field">
+                <label class="form-label">Nome do Turno *</label>
+                <input type="text" name="nome" id="nome" class="form-input" 
+                       placeholder="Ex: Manhã, Tarde, Noite..." required>
+            </div>
+            
+            <div class="form-field">
+                <label class="form-label">Horário de Entrada *</label>
+                <input type="time" name="horario_entrada" id="horario_entrada" class="form-input" required>
+            </div>
+            
+            <div class="form-field">
+                <label class="form-label">Horário de Saída *</label>
+                <input type="time" name="horario_saida" id="horario_saida" class="form-input" required>
+            </div>
+            
+            <div class="form-field">
+                <label class="form-label">Mínimo de Funcionários *</label>
+                <input type="number" name="minimo_funcionarios" id="minimo_funcionarios"
+                       class="form-input" min="1" value="2" required>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">💾 Salvar</button>
+                <button type="button" onclick="fecharForm()" class="btn btn-secondary">❌ Cancelar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function mostrarForm() {
+    document.getElementById('formTitle').textContent = 'Novo Turno';
+    document.getElementById('turnoForm').action = "{% url 'escala:turno_novo' %}";
+    document.getElementById('turnoId').value = '';
+    document.getElementById('nome').value = '';
+    document.getElementById('horario_entrada').value = '';
+    document.getElementById('horario_saida').value = '';
+    document.getElementById('minimo_funcionarios').value = '2';
+    document.getElementById('formModal').classList.add('show');
+}
+
+function editarTurno(id, nome, entrada, saida, minimo) {
+    document.getElementById('formTitle').textContent = 'Editar Turno';
+    document.getElementById('turnoForm').action = `/turnos/${id}/editar/`;
+    document.getElementById('turnoId').value = id;
+    document.getElementById('nome').value = nome;
+    document.getElementById('horario_entrada').value = entrada;
+    document.getElementById('horario_saida').value = saida;
+    document.getElementById('minimo_funcionarios').value = minimo;
+    document.getElementById('formModal').classList.add('show');
+}
+
+function fecharForm() {
+    document.getElementById('formModal').classList.remove('show');
+}
+
+// Fechar ao clicar fora
+document.getElementById('formModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        fecharForm();
+    }
+});
+</script>
+
+{% endblock %}
