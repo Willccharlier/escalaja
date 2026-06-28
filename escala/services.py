@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 from calendar import monthrange
-from .models import Funcionario, Feriado, Escala, DiaEscala, Turno, ConfiguracaoSistema
+from .models import Funcionario, Feriado, Escala, DiaEscala, Turno, Grupo, SetorTurno, ConfiguracaoSistema
 from django.db import transaction
 import random
 from itertools import combinations
@@ -18,6 +18,7 @@ class GeradorEscala:
         self.alertas = []
         self.escala_gerada = {}   # {funcionario_id: {dia: situacao}}
         self.turno_coberto = {}   # {funcionario_id: {dia: turno_id}} — só folguistas
+        self.setor_coberto = {}   # {funcionario_id: {dia: grupo_id}} — só folguistas
         self.config = ConfiguracaoSistema.get()
         
     def gerar(self):
@@ -27,32 +28,35 @@ class GeradorEscala:
         """
         try:
             with transaction.atomic():
-                # 1. Criar objeto Escala
+                # 1. Criar objeto Escala (remove existente se houver)
+                Escala.objects.filter(mes=self.mes, ano=self.ano).delete()
                 escala = Escala.objects.create(
                     mes=self.mes,
                     ano=self.ano,
                     gerada_com_sucesso=False
                 )
                 
-                # 2. Buscar turnos
-                turnos = Turno.objects.all()
-                
-                if not turnos.exists():
-                    self.alertas.append("❌ ERRO: Nenhum turno cadastrado!")
+                # 2. Buscar setores com funcionários ativos
+                setores = Grupo.objects.filter(
+                    funcionario__tipo='REGULAR', funcionario__ativo=True
+                ).distinct()
+
+                if not setores.exists():
+                    self.alertas.append("❌ ERRO: Nenhum setor com funcionários cadastrado!")
                     escala.observacoes = "\n".join(self.alertas)
                     escala.save()
                     return False, escala, self.alertas
-                
+
                 # 3. Buscar feriados do mês
                 feriados = self._buscar_feriados_mes()
-                
-                # 4. Gerar escala POR TURNO com 2 folgas/semana
-                for turno in turnos:
-                    sucesso_turno = self._gerar_escala_turno(turno, feriados)
-                    if not sucesso_turno:
-                        self.alertas.append(f"❌ Impossível gerar escala para turno {turno.nome}")
 
-                # 4b. Gerar folgas dos folguistas e escalá-los nas coberturas
+                # 4. Gerar escala POR SETOR com folgas/semana por regime
+                for setor in setores:
+                    sucesso_setor = self._gerar_escala_setor(setor, feriados)
+                    if not sucesso_setor:
+                        self.alertas.append(f"❌ Impossível gerar escala para setor {setor.nome}")
+
+                # 4b. Gerar folgas dos folguistas e escalá-los nas coberturas de setor
                 self._gerar_escala_folguistas()
                 self._escalar_folguistas_coberturas()
 
@@ -199,20 +203,22 @@ class GeradorEscala:
                 inserido = False
                 candidatos = sorted(violacao, key=lambda d: abs(d - meio))
 
+                setor_func = func.grupo
                 turno_func = func.turno
-                minimo_turno = turno_func.minimo_funcionarios if turno_func else 0
-                funcionarios_turno = list(Funcionario.objects.filter(
-                    tipo='REGULAR', ativo=True, turno=turno_func
-                )) if turno_func else []
+                st_obj = SetorTurno.objects.filter(setor=setor_func, turno=turno_func).first() if setor_func and turno_func else None
+                minimo_st = st_obj.minimo_funcionarios if st_obj else 0
+                funcionarios_st = list(Funcionario.objects.filter(
+                    tipo='REGULAR', ativo=True, grupo=setor_func, turno=turno_func
+                )) if setor_func and turno_func else []
 
                 for dia_folga in candidatos:
                     trabalhando = sum(
-                        1 for f in funcionarios_turno
+                        1 for f in funcionarios_st
                         if f.id != func.id and
                         self.escala_gerada.get(f.id, {}).get(dia_folga) == 'TRABALHA'
                     )
 
-                    if trabalhando >= minimo_turno:
+                    if trabalhando >= minimo_st:
                         self.escala_gerada[func.id][dia_folga] = 'FOLGA'
                         correcoes += 1
                         inserido = True
@@ -288,11 +294,13 @@ class GeradorEscala:
                 if not sem:
                     break
 
+                setor = func.grupo
                 turno = func.turno
-                minimo = turno.minimo_funcionarios if turno else 0
+                st_obj2 = SetorTurno.objects.filter(setor=setor, turno=turno).first() if setor and turno else None
+                minimo = st_obj2.minimo_funcionarios if st_obj2 else 0
                 colegas = list(Funcionario.objects.filter(
-                    tipo='REGULAR', ativo=True, turno=turno
-                ).exclude(id=func_id)) if turno else []
+                    tipo='REGULAR', ativo=True, grupo=setor, turno=turno
+                ).exclude(id=func_id)) if setor and turno else []
 
                 movido = False
                 for dia_novo in sem:
@@ -346,7 +354,7 @@ class GeradorEscala:
         semanas = self._dividir_em_semanas_correto()
         funcionarios = list(Funcionario.objects.filter(
             id__in=self.escala_gerada.keys(), tipo='REGULAR'
-        ).select_related('turno'))
+        ).select_related('turno', 'grupo'))
         removidos = 0
 
         for func in funcionarios:
@@ -358,12 +366,14 @@ class GeradorEscala:
             if excesso <= 0:
                 continue
 
+            setor = func.grupo
             turno = func.turno
-            minimo = turno.minimo_funcionarios if turno else 0
+            st_obj = SetorTurno.objects.filter(setor=setor, turno=turno).first() if setor and turno else None
+            minimo = st_obj.minimo_funcionarios if st_obj else 0
             colegas = [
-                f for f in Funcionario.objects.filter(tipo='REGULAR', ativo=True, turno=turno)
+                f for f in Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=setor, turno=turno)
                 if f.id != func.id
-            ] if turno else []
+            ] if setor and turno else []
 
             def cobertura(dia):
                 return sum(
@@ -428,25 +438,27 @@ class GeradorEscala:
                 return semana
         return None
     
-    def _gerar_escala_turno(self, turno, feriados):
-        """Gera escala para um turno, respeitando o regime individual de cada funcionário"""
+    def _gerar_escala_setor(self, setor, feriados):
+        """Gera escala para um setor, respeitando o regime individual de cada funcionário"""
         funcionarios = list(Funcionario.objects.filter(
             tipo='REGULAR',
             ativo=True,
-            turno=turno
+            grupo=setor
         ))
 
         if not funcionarios:
-            self.alertas.append(f"⚠️ Turno {turno.nome}: Nenhum funcionário!")
+            self.alertas.append(f"⚠️ Setor {setor.nome}: Nenhum funcionário!")
             return False
 
-        minimo = turno.minimo_funcionarios
+        # Mínimo do setor = soma dos mínimos por turno configurados em SetorTurno
+        minimo = sum(
+            st.minimo_funcionarios
+            for st in SetorTurno.objects.filter(setor=setor)
+        ) or 1
 
-        # Folguistas habilitados para este turno funcionam como cobertura de backup.
-        # O mínimo efetivo para regulares é reduzido por quantos folguistas podem cobrir,
-        # permitindo que regulares (ex: único do NOITE) folguem no domingo sem bloqueio.
+        # Folguistas habilitados para este setor funcionam como cobertura de backup.
         folguistas_backup = Funcionario.objects.filter(
-            tipo='FOLGUISTA', ativo=True, turnos_habilitados=turno
+            tipo='FOLGUISTA', ativo=True, grupos_habilitados=setor
         ).count()
         minimo_regulares = max(0, minimo - folguistas_backup)
 
@@ -456,43 +468,46 @@ class GeradorEscala:
 
         semanas = self._dividir_em_semanas_correto()
 
-        # Processar todos juntos — quota individual por regime
         for idx_semana, semana in enumerate(semanas):
             semana_anterior = semanas[idx_semana - 1] if idx_semana > 0 else None
             sucesso = self._processar_semana(funcionarios, semana, minimo_regulares, idx_semana + 1, semana_anterior)
             if not sucesso:
-                self.alertas.append(f"⚠️ Semana {idx_semana + 1}: Impossível distribuir folgas!")
+                self.alertas.append(f"⚠️ Setor {setor.nome} — Semana {idx_semana + 1}: Impossível distribuir folgas!")
 
         return True
 
     def _dias_criticos_folguista(self, func):
         """Retorna conjunto de dias onde o folguista não pode folgar.
-        Um dia é crítico se algum turno habilitado ficaria abaixo do mínimo sem ele."""
-        from itertools import chain
-        turnos_hab = list(func.turnos_habilitados.all())
-        if not turnos_hab:
+        Um dia é crítico se algum setor habilitado ficaria abaixo do mínimo sem ele."""
+        setores_hab = list(func.grupos_habilitados.all())
+        if not setores_hab:
             return set()
+
+        # Pré-carregar SetorTurno para setores habilitados
+        setor_turnos_hab = list(
+            SetorTurno.objects.filter(setor__in=setores_hab).select_related('setor', 'turno')
+        )
 
         criticos = set()
         for dia in range(1, self.dias_mes + 1):
-            for turno in turnos_hab:
-                regulares = Funcionario.objects.filter(tipo='REGULAR', ativo=True, turno=turno)
+            for st in setor_turnos_hab:
+                regulares = Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno)
                 trabalhando = sum(
                     1 for f in regulares
                     if f.id in self.escala_gerada and
                     self.escala_gerada[f.id].get(dia) == 'TRABALHA'
                 )
-                if trabalhando < turno.minimo_funcionarios:
+                if trabalhando < st.minimo_funcionarios:
                     criticos.add(dia)
                     break
         return criticos
 
     def _gerar_escala_folguistas(self):
         """Gera folgas para funcionários FOLGUISTA com base no regime deles.
-        Nunca coloca folga em dia crítico (dia onde algum turno habilitado ficaria sem mínimo)."""
+        Nunca coloca folga em dia crítico (dia onde algum setor habilitado ficaria sem mínimo)."""
         folguistas = list(
             Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
-            .prefetch_related('turnos_habilitados')
+            .prefetch_related('grupos_habilitados')
         )
         if not folguistas:
             return
@@ -583,66 +598,117 @@ class GeradorEscala:
 
     def _escalar_folguistas_coberturas(self):
         """
-        Atribui um turno a cada dia de trabalho do folguista.
-        Prioriza turnos com déficit; se não houver déficit, atribui ao turno
-        com menos funcionários trabalhando naquele dia (dos habilitados).
+        Atribui setor+turno a cada dia de trabalho do folguista.
+
+        Lógica: o folguista cobre o setor do funcionário REGULAR que está de
+        FOLGA naquele dia (é para isso que o folguista existe).
+
+        Prioridade:
+          1. Setor×turno com regular de folga (déficit real) — habilitado p/ folguista
+          2. Setor×turno configurado em SetorTurno com maior déficit — habilitado p/ folguista
+          3. Fallback: turno com menor cobertura dentre os turnos_habilitados
         """
         folguistas = list(
             Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
-            .prefetch_related('turnos_habilitados')
+            .prefetch_related('grupos_habilitados', 'turnos_habilitados')
         )
         if not folguistas:
             return
 
-        turnos_habilitados_cache = {
+        # Cache: folguista -> set de setor_ids e turno_ids habilitados
+        setores_hab_cache = {
+            f.id: set(f.grupos_habilitados.values_list('id', flat=True))
+            for f in folguistas
+        }
+        turnos_hab_cache = {
             f.id: set(f.turnos_habilitados.values_list('id', flat=True))
             for f in folguistas
         }
 
-        turnos = list(Turno.objects.all().order_by('horario_entrada'))
+        # Todos os SetorTurno configurados
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
+
+        # Todos os regulares com setor+turno para verificar quem está de folga
+        regulares = list(
+            Funcionario.objects.filter(tipo='REGULAR', ativo=True)
+            .select_related('grupo', 'turno')
+        )
 
         for dia in range(1, self.dias_mes + 1):
-            # Conta trabalhando por turno neste dia (apenas REGULAR)
-            contagem_turno = {}
-            for turno in turnos:
-                regulares = list(Funcionario.objects.filter(tipo='REGULAR', ativo=True, turno=turno))
-                contagem_turno[turno.id] = sum(
-                    1 for f in regulares
-                    if f.id in self.escala_gerada and self.escala_gerada[f.id].get(dia) == 'TRABALHA'
-                )
+            # Monta situação dos regulares neste dia
+            # quem_de_folga: lista de (setor_id, turno_id) de regulares que estão de FOLGA
+            quem_de_folga = []
+            contagem_st = {}  # (setor_id, turno_id) -> quantos trabalhando
+
+            for reg in regulares:
+                if reg.grupo is None or reg.turno is None:
+                    continue
+                key = (reg.grupo.id, reg.turno.id)
+                sit = self.escala_gerada.get(reg.id, {}).get(dia, 'TRABALHA')
+                if sit == 'TRABALHA':
+                    contagem_st[key] = contagem_st.get(key, 0) + 1
+                else:
+                    quem_de_folga.append(key)
 
             for func in folguistas:
                 if self.escala_gerada.get(func.id, {}).get(dia) != 'TRABALHA':
                     continue
-
-                if dia in self.turno_coberto.get(func.id, {}):
+                if dia in self.setor_coberto.get(func.id, {}):
                     continue
 
-                habilitados = [t for t in turnos if t.id in turnos_habilitados_cache.get(func.id, set())]
-                if not habilitados:
+                hab_ids_setor = setores_hab_cache.get(func.id, set())
+                hab_ids_turno = turnos_hab_cache.get(func.id, set())
+
+                # 1. Prioridade: cobrir folga real de um regular habilitado
+                candidatos_folga = [
+                    (sid, tid) for (sid, tid) in quem_de_folga
+                    if sid in hab_ids_setor and tid in hab_ids_turno
+                ]
+
+                if candidatos_folga:
+                    # Escolhe o par (setor, turno) com mais folgas (mais necessitado)
+                    from collections import Counter
+                    contagem_folgas = Counter(candidatos_folga)
+                    sid, tid = contagem_folgas.most_common(1)[0][0]
+                    setor_obj = next((st.setor for st in setor_turnos if st.setor.id == sid), None)
+                    turno_obj = next((st.turno for st in setor_turnos if st.turno.id == tid), None)
+                    if not setor_obj:
+                        setor_obj = Grupo.objects.filter(id=sid).first()
+                    if not turno_obj:
+                        turno_obj = Turno.objects.filter(id=tid).first()
+
+                    if setor_obj and turno_obj:
+                        self.setor_coberto.setdefault(func.id, {})[dia] = sid
+                        self.turno_coberto.setdefault(func.id, {})[dia] = tid
+                        contagem_st[(sid, tid)] = contagem_st.get((sid, tid), 0) + 1
+                        quem_de_folga.remove((sid, tid))
+                        continue
+
+                # 2. Fallback: SetorTurno configurado com maior déficit
+                habilitados_st = [
+                    st for st in setor_turnos
+                    if st.setor.id in hab_ids_setor and st.turno.id in hab_ids_turno
+                ]
+                if habilitados_st:
+                    def deficit_st(st):
+                        return st.minimo_funcionarios - contagem_st.get((st.setor.id, st.turno.id), 0)
+                    escolhido = max(habilitados_st, key=deficit_st)
+                    self.setor_coberto.setdefault(func.id, {})[dia] = escolhido.setor.id
+                    self.turno_coberto.setdefault(func.id, {})[dia] = escolhido.turno.id
+                    contagem_st[(escolhido.setor.id, escolhido.turno.id)] = \
+                        contagem_st.get((escolhido.setor.id, escolhido.turno.id), 0) + 1
                     continue
 
-                # Primeiro: turno com déficit
-                turno_escolhido = None
-                for turno in habilitados:
-                    deficit = turno.minimo_funcionarios - contagem_turno.get(turno.id, 0)
-                    if deficit > 0:
-                        turno_escolhido = turno
-                        break
-
-                # Sem déficit: turno com menor cobertura relativa ao seu mínimo
-                # Ex: NOITE 1/1 (100%) vs MANHA 2/3 (67%) → vai para MANHA
-                if turno_escolhido is None:
-                    def _cobertura_rel(t):
-                        minimo = t.minimo_funcionarios
-                        atual = contagem_turno.get(t.id, 0)
-                        return atual / minimo if minimo > 0 else float('inf')
-                    turno_escolhido = min(habilitados, key=_cobertura_rel)
-
-                if func.id not in self.turno_coberto:
-                    self.turno_coberto[func.id] = {}
-                self.turno_coberto[func.id][dia] = turno_escolhido.id
-                contagem_turno[turno_escolhido.id] = contagem_turno.get(turno_escolhido.id, 0) + 1
+                # 3. Último recurso: turno habilitado com menos cobertura
+                if hab_ids_turno:
+                    turnos_hab = list(Turno.objects.filter(id__in=hab_ids_turno))
+                    turno_escolhido = min(
+                        turnos_hab,
+                        key=lambda t: sum(1 for d2 in self.turno_coberto.values() if d2.get(dia) == t.id)
+                    )
+                    self.turno_coberto.setdefault(func.id, {})[dia] = turno_escolhido.id
+                key = (escolhido.setor.id, escolhido.turno.id)
+                contagem_st[key] = contagem_st.get(key, 0) + 1
 
     def _folgas_semana(self, func, dias_count):
         """Retorna quantas folgas o funcionário precisa na semana, dado seu regime"""
@@ -934,18 +1000,24 @@ class GeradorEscala:
 
         funcs = list(Funcionario.objects.filter(
             id__in=self.escala_gerada.keys()
-        ).select_related('turno'))
+        ).select_related('grupo'))
 
-        # Pré-computar colegas de turno por funcionário
-        colegas_turno = {}
+        # Pré-computar colegas de setor por funcionário
+        colegas_setor = {}
         for func in funcs:
-            if func.turno:
-                colegas_turno[func.id] = [
+            if func.grupo:
+                colegas_setor[func.id] = [
                     f for f in funcs
-                    if f.id != func.id and f.turno_id == func.turno_id
+                    if f.id != func.id and f.grupo_id == func.grupo_id
                 ]
             else:
-                colegas_turno[func.id] = []
+                colegas_setor[func.id] = []
+
+        # Pré-carregar folguistas com setores habilitados
+        folguistas_ativos = list(
+            Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
+            .prefetch_related('grupos_habilitados')
+        )
 
         for func in funcs:
             if func.regime != '6x1':
@@ -958,13 +1030,8 @@ class GeradorEscala:
             if tem_domingo:
                 continue
 
-            minimo = func.turno.minimo_funcionarios if func.turno else 0
-
-            # Pré-carregar folguistas com turnos habilitados
-            folguistas_ativos = list(
-                Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
-                .prefetch_related('turnos_habilitados')
-            )
+            st_dom = SetorTurno.objects.filter(setor=func.grupo, turno=func.turno).first() if func.grupo and func.turno else None
+            minimo = st_dom.minimo_funcionarios if st_dom else 0
 
             for domingo in domingos:
                 if self.escala_gerada[func.id].get(domingo) != 'TRABALHA':
@@ -975,18 +1042,18 @@ class GeradorEscala:
                     continue
 
                 # Cobertura regular no domingo
-                colegas = colegas_turno[func.id]
+                colegas = colegas_setor[func.id]
                 regulares_no_domingo = sum(
                     1 for f in colegas
                     if self.escala_gerada.get(f.id, {}).get(domingo) == 'TRABALHA'
                 )
 
-                # Folguistas disponíveis (trabalhando no domingo, habilitados para este turno)
+                # Folguistas cobrindo este setor no domingo
                 folguistas_cobrindo = [
                     f for f in folguistas_ativos
                     if (self.escala_gerada.get(f.id, {}).get(domingo) == 'TRABALHA'
-                        and func.turno
-                        and func.turno.id in f.turnos_habilitados.values_list('id', flat=True))
+                        and func.grupo
+                        and func.grupo.id in f.grupos_habilitados.values_list('id', flat=True))
                 ]
 
                 cobertura_total = regulares_no_domingo + len(folguistas_cobrindo)
@@ -1003,16 +1070,15 @@ class GeradorEscala:
                     self.escala_gerada[func.id][domingo] = 'FOLGA'
                     self.escala_gerada[func.id][dia] = 'TRABALHA'
 
-                    # Atualizar turno_coberto do folguista ANTES de validar,
-                    # pois a validação conta folguistas via turno_coberto
+                    # Atualizar setor_coberto do folguista ANTES de validar
                     folg_backup = None
-                    if folguistas_cobrindo and func.turno:
+                    if folguistas_cobrindo and func.grupo:
                         folg = folguistas_cobrindo[0]
-                        old_turno = self.turno_coberto.get(folg.id, {}).get(domingo)
-                        folg_backup = (folg.id, domingo, old_turno)
-                        if folg.id not in self.turno_coberto:
-                            self.turno_coberto[folg.id] = {}
-                        self.turno_coberto[folg.id][domingo] = func.turno.id
+                        old_setor = self.setor_coberto.get(folg.id, {}).get(domingo)
+                        folg_backup = (folg.id, domingo, old_setor)
+                        if folg.id not in self.setor_coberto:
+                            self.setor_coberto[folg.id] = {}
+                        self.setor_coberto[folg.id][domingo] = func.grupo.id
 
                     if (self._validar_consecutividade_funcionario(func.id) and
                             self._validar_lotacao_dias_especificos([domingo, dia])):
@@ -1024,11 +1090,11 @@ class GeradorEscala:
                         self.escala_gerada[func.id][domingo] = 'TRABALHA'
                         self.escala_gerada[func.id][dia] = 'FOLGA'
                         if folg_backup:
-                            fid, d, old_t = folg_backup
-                            if old_t is None:
-                                self.turno_coberto.get(fid, {}).pop(d, None)
+                            fid, d, old_s = folg_backup
+                            if old_s is None:
+                                self.setor_coberto.get(fid, {}).pop(d, None)
                             else:
-                                self.turno_coberto[fid][d] = old_t
+                                self.setor_coberto[fid][d] = old_s
 
                 if trocou:
                     break
@@ -1036,87 +1102,83 @@ class GeradorEscala:
         return trocas_realizadas
     
     def _validar_minimos_por_dia(self):
-        """Valida se todos os dias têm lotação mínima.
-        Conta regulares + folguistas cobrindo o turno via turno_coberto."""
+        """Valida se todos os dias têm lotação mínima por setor×turno.
+        Conta regulares (grupo+turno) + folguistas (setor_coberto+turno_coberto)."""
         problemas = []
-        turnos = Turno.objects.all()
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
 
         for dia in range(1, self.dias_mes + 1):
-            for turno in turnos:
-                funcionarios_turno = Funcionario.objects.filter(
-                    tipo='REGULAR',
-                    ativo=True,
-                    turno=turno
+            for st in setor_turnos:
+                funcionarios_st = Funcionario.objects.filter(
+                    tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno
                 )
+                if not funcionarios_st.exists():
+                    continue
 
                 regulares = sum(
-                    1 for func in funcionarios_turno
+                    1 for func in funcionarios_st
                     if func.id in self.escala_gerada and
                     self.escala_gerada[func.id].get(dia) == 'TRABALHA'
                 )
-
-                # Folguistas cobrindo este turno neste dia contam para o mínimo
                 folguistas = sum(
-                    1 for fid, dias_turno in self.turno_coberto.items()
-                    if dias_turno.get(dia) == turno.id
+                    1 for fid, dias_setor in self.setor_coberto.items()
+                    if dias_setor.get(dia) == st.setor.id and
+                    self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
                 )
-
                 trabalhando = regulares + folguistas
 
-                if trabalhando < turno.minimo_funcionarios:
+                if trabalhando < st.minimo_funcionarios:
                     problemas.append(
                         f"DIA {dia:02d}/{self.mes:02d} - "
-                        f"Turno {turno.nome}: {trabalhando}/{turno.minimo_funcionarios}"
+                        f"{st.setor.nome}/{st.turno.nome}: {trabalhando}/{st.minimo_funcionarios}"
                     )
 
         return problemas
-    
+
     def _corrigir_por_redistribuicao(self):
-        """Corrige lotação movendo folgas dentro da mesma semana"""
+        """Corrige lotação movendo folgas dentro da mesma semana (por setor×turno)"""
         correcoes_feitas = 0
-        turnos = Turno.objects.all()
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
         semanas = self._dividir_em_semanas_correto()
-        
-        for turno in turnos:
-            funcionarios_turno = list(Funcionario.objects.filter(
-                tipo='REGULAR',
-                ativo=True,
-                turno=turno
+
+        for st in setor_turnos:
+            funcionarios_st = list(Funcionario.objects.filter(
+                tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno
             ))
-            
-            if not funcionarios_turno:
+
+            if not funcionarios_st:
                 continue
-            
+
             for dia in range(1, self.dias_mes + 1):
                 regulares = sum(
-                    1 for f in funcionarios_turno
+                    1 for f in funcionarios_st
                     if f.id in self.escala_gerada and
                     self.escala_gerada[f.id].get(dia) == 'TRABALHA'
                 )
                 folguistas = sum(
-                    1 for fid, dias_turno in self.turno_coberto.items()
-                    if dias_turno.get(dia) == turno.id
+                    1 for fid, dias_setor in self.setor_coberto.items()
+                    if dias_setor.get(dia) == st.setor.id and
+                    self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
                 )
                 trabalhando = regulares + folguistas
-
-                falta = turno.minimo_funcionarios - trabalhando
+                falta = st.minimo_funcionarios - trabalhando
 
                 if falta <= 0:
                     continue
-                
+
                 candidatos = [
-                    f for f in funcionarios_turno
+                    f for f in funcionarios_st
                     if f.id in self.escala_gerada and
                     self.escala_gerada[f.id].get(dia) == 'FOLGA'
                 ]
-                
+
                 for candidato in candidatos[:falta]:
-                    if self._tentar_trocar_folga_mesma_semana(candidato.id, dia, funcionarios_turno, turno.minimo_funcionarios, semanas):
+                    if self._tentar_trocar_folga_mesma_semana(candidato.id, dia, funcionarios_st, st.minimo_funcionarios, semanas):
                         correcoes_feitas += 1
                         falta -= 1
                         if falta == 0:
                             break
-        
+
         return correcoes_feitas
     
     def _tentar_trocar_folga_mesma_semana(self, func_id, dia_problema, funcionarios_turno, minimo, semanas):
@@ -1245,28 +1307,29 @@ class GeradorEscala:
         return True
     
     def _validar_lotacao_dias_especificos(self, dias):
-        """Valida lotação de dias específicos, contando regulares + folguistas."""
-        turnos = Turno.objects.all()
+        """Valida lotação de dias específicos por setor×turno, contando regulares + folguistas."""
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
 
         for dia in dias:
-            for turno in turnos:
-                funcionarios_turno = Funcionario.objects.filter(
-                    tipo='REGULAR',
-                    ativo=True,
-                    turno=turno
+            for st in setor_turnos:
+                funcionarios_st = Funcionario.objects.filter(
+                    tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno
                 )
+                if not funcionarios_st.exists():
+                    continue
 
                 regulares = sum(
-                    1 for f in funcionarios_turno
+                    1 for f in funcionarios_st
                     if f.id in self.escala_gerada and
                     self.escala_gerada[f.id].get(dia) == 'TRABALHA'
                 )
                 folguistas = sum(
-                    1 for fid, dias_turno in self.turno_coberto.items()
-                    if dias_turno.get(dia) == turno.id
+                    1 for fid, dias_setor in self.setor_coberto.items()
+                    if dias_setor.get(dia) == st.setor.id and
+                    self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
                 )
 
-                if regulares + folguistas < turno.minimo_funcionarios:
+                if regulares + folguistas < st.minimo_funcionarios:
                     return False
 
         return True
@@ -1327,6 +1390,7 @@ class GeradorEscala:
         """Salva escala no banco"""
         dias_para_criar = []
         turno_cache = {t.id: t for t in Turno.objects.all()}
+        setor_cache = {g.id: g for g in Grupo.objects.all()}
 
         for func_id, dias_func in self.escala_gerada.items():
             funcionario = Funcionario.objects.get(id=func_id)
@@ -1335,6 +1399,8 @@ class GeradorEscala:
                 data = date(self.ano, self.mes, dia)
                 turno_cob_id = self.turno_coberto.get(func_id, {}).get(dia)
                 turno_cob = turno_cache.get(turno_cob_id) if turno_cob_id else None
+                setor_cob_id = self.setor_coberto.get(func_id, {}).get(dia)
+                setor_cob = setor_cache.get(setor_cob_id) if setor_cob_id else None
 
                 dias_para_criar.append(
                     DiaEscala(
@@ -1342,7 +1408,8 @@ class GeradorEscala:
                         funcionario=funcionario,
                         data=data,
                         situacao=situacao,
-                        turno_coberto=turno_cob
+                        turno_coberto=turno_cob,
+                        setor_coberto=setor_cob,
                     )
                 )
 

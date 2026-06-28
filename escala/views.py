@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # Imports locais
-from .models import Escala, DiaEscala, Funcionario, Turno, Feriado, ConfiguracaoSistema, Grupo
+from .models import Escala, DiaEscala, Funcionario, Turno, Feriado, ConfiguracaoSistema, Grupo, SetorTurno
 from .services import GeradorEscala
 
 
@@ -110,30 +110,25 @@ def dashboard(request):
     tempo_para_proximo = f"{hp:02d}:{mp:02d}"
 
     # ===== FUNCIONÁRIOS =====
-    funcionarios_turno_atual = DiaEscala.objects.filter(
-        data=inicio_data,
-        funcionario__turno=turno_atual,
-        funcionario__ativo=True,
-        situacao='TRABALHA'
-    ).select_related('funcionario')
+    # Inclui regulares do turno + folguistas cobrindo o turno (via turno_coberto)
+    from django.db.models import Q
+
+    def _funcionarios_no_turno(data_dia, turno):
+        return DiaEscala.objects.filter(
+            Q(funcionario__turno=turno) | Q(turno_coberto=turno),
+            data=data_dia,
+            funcionario__ativo=True,
+            situacao='TRABALHA'
+        ).select_related('funcionario')
+
+    funcionarios_turno_atual = _funcionarios_no_turno(inicio_data, turno_atual)
 
     data_turno_anterior = inicio_data
     if turno_anterior.horario_saida < turno_anterior.horario_entrada:
         data_turno_anterior = inicio_data - timedelta(days=1)
 
-    funcionarios_turno_anterior = DiaEscala.objects.filter(
-        data=data_turno_anterior,
-        funcionario__turno=turno_anterior,
-        funcionario__ativo=True,
-        situacao='TRABALHA'
-    ).select_related('funcionario')
-
-    funcionarios_turno_proximo = DiaEscala.objects.filter(
-        data=fim_data,
-        funcionario__turno=turno_proximo,
-        funcionario__ativo=True,
-        situacao='TRABALHA'
-    ).select_related('funcionario')
+    funcionarios_turno_anterior = _funcionarios_no_turno(data_turno_anterior, turno_anterior)
+    funcionarios_turno_proximo = _funcionarios_no_turno(fim_data, turno_proximo)
 
     context = {
         'turno_atual': turno_atual,
@@ -177,7 +172,7 @@ def escala_detalhe(request, pk):
         })
 
     dias_escala = DiaEscala.objects.filter(escala=escala).select_related(
-        'funcionario', 'funcionario__turno', 'turno_coberto'
+        'funcionario', 'funcionario__turno', 'funcionario__grupo', 'turno_coberto', 'setor_coberto'
     )
 
     SIT_MAP = {
@@ -197,27 +192,42 @@ def escala_detalhe(request, pk):
             situacao = func_data['dias_situacao'][dia]
             classe, simbolo = SIT_MAP.get(situacao, ('', ''))
             if situacao == 'TRABALHA' and dias_turno and dias_turno[dia]:
-                simbolo = dias_turno[dia][:3].upper()
+                simbolo = dias_turno[dia].upper()
             linha['dias'].append({'classe': classe, 'simbolo': simbolo, 'situacao': situacao})
         return linha
 
-    # Turno sections (REGULAR employees)
-    turnos = list(Turno.objects.all().order_by('horario_entrada'))
-    turnos_data = []
-    for turno in turnos:
+    # Setor sections (REGULAR employees grouped by Grupo/Setor)
+    setores = list(Grupo.objects.filter(
+        funcionario__tipo='REGULAR', funcionario__ativo=True
+    ).distinct().order_by('nome'))
+    turnos_data = []  # mantém nome turnos_data para compatibilidade com template
+    for setor in setores:
         func_dict = {}
         for dia_obj in dias_escala:
-            if dia_obj.funcionario.turno_id != turno.id:
+            if dia_obj.funcionario.tipo != 'REGULAR':
+                continue
+            if dia_obj.funcionario.grupo_id != setor.id:
                 continue
             fid = dia_obj.funcionario.id
             if fid not in func_dict:
-                func_dict[fid] = {'id': fid, 'nome': dia_obj.funcionario.nome, 'dias_situacao': [''] * (dias_mes + 1)}
+                turno_func = dia_obj.funcionario.turno
+                horario = (f"{turno_func.horario_entrada.strftime('%H:%M')}–{turno_func.horario_saida.strftime('%H:%M')}"
+                           if turno_func else '')
+                func_dict[fid] = {
+                    'id': fid,
+                    'nome': dia_obj.funcionario.nome,
+                    'turno_nome': turno_func.nome if turno_func else '',
+                    'horario': horario,
+                    'dias_situacao': [''] * (dias_mes + 1),
+                }
             func_dict[fid]['dias_situacao'][dia_obj.data.day] = dia_obj.situacao
-        turnos_data.append({
-            'nome': turno.nome,
-            'horario': f"{turno.horario_entrada.strftime('%H:%M')}–{turno.horario_saida.strftime('%H:%M')}",
-            'funcionarios': [montar_linha(fd) for fd in func_dict.values()],
-        })
+        if func_dict:
+            turnos_data.append({
+                'nome': setor.nome,
+                'horario': '',   # setor não tem horário fixo
+                'funcionarios': [montar_linha(fd) for fd in func_dict.values()],
+                'func_detalhes': list(func_dict.values()),  # com turno_nome e horario por func
+            })
 
     # Folguistas section
     folguista_dict = {}
@@ -230,14 +240,23 @@ def escala_detalhe(request, pk):
                 'id': fid,
                 'nome': dia_obj.funcionario.nome,
                 'dias_situacao': [''] * (dias_mes + 1),
-                'dias_turno': [None] * (dias_mes + 1),
+                'dias_label': [None] * (dias_mes + 1),   # texto exibido na célula
+                'dias_turno_id': [None] * (dias_mes + 1),
+                'dias_setor_id': [None] * (dias_mes + 1),
             }
-        folguista_dict[fid]['dias_situacao'][dia_obj.data.day] = dia_obj.situacao
-        if dia_obj.turno_coberto:
-            folguista_dict[fid]['dias_turno'][dia_obj.data.day] = dia_obj.turno_coberto.nome
+        d = dia_obj.data.day
+        folguista_dict[fid]['dias_situacao'][d] = dia_obj.situacao
+        if dia_obj.setor_coberto and dia_obj.turno_coberto:
+            label = f"{dia_obj.setor_coberto.nome[:4]}/{dia_obj.turno_coberto.nome[:3]}"
+            folguista_dict[fid]['dias_label'][d] = label
+            folguista_dict[fid]['dias_turno_id'][d] = dia_obj.turno_coberto.id
+            folguista_dict[fid]['dias_setor_id'][d] = dia_obj.setor_coberto.id
+        elif dia_obj.turno_coberto:
+            folguista_dict[fid]['dias_label'][d] = dia_obj.turno_coberto.nome[:4]
+            folguista_dict[fid]['dias_turno_id'][d] = dia_obj.turno_coberto.id
 
     folguistas_data = [
-        montar_linha(fd, dias_turno=fd['dias_turno'])
+        montar_linha(fd, dias_turno=fd['dias_label'])
         for fd in folguista_dict.values()
     ]
 
@@ -372,43 +391,47 @@ def revalidar_escala(request, pk):
         else:
             alertas.append("✅ Todos os funcionários 6x1 têm pelo menos 1 domingo de folga!")
 
-    # 3. Validar lotação mínima (conta regulares + folguistas via turno_coberto)
+    # 3. Validar lotação mínima por setor×turno
     alertas.append("\n🔍 VALIDANDO LOTAÇÃO MÍNIMA...")
-    turnos = Turno.objects.all()
+    from .models import SetorTurno
+    setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
     problemas_lotacao = []
 
-    # Montar turno_coberto a partir do banco
+    # Montar setor_coberto e turno_coberto a partir do banco
+    setor_coberto_db = {}  # {func_id: {dia: setor_id}}
     turno_coberto_db = {}  # {func_id: {dia: turno_id}}
-    for dia_obj in DiaEscala.objects.filter(escala=escala).select_related('turno_coberto', 'funcionario'):
-        if dia_obj.funcionario.tipo == 'FOLGUISTA' and dia_obj.turno_coberto:
+    for dia_obj in DiaEscala.objects.filter(escala=escala).select_related('setor_coberto', 'turno_coberto', 'funcionario'):
+        if dia_obj.funcionario.tipo == 'FOLGUISTA':
             fid = dia_obj.funcionario.id
-            if fid not in turno_coberto_db:
-                turno_coberto_db[fid] = {}
-            turno_coberto_db[fid][dia_obj.data.day] = dia_obj.turno_coberto.id
+            if dia_obj.setor_coberto:
+                setor_coberto_db.setdefault(fid, {})[dia_obj.data.day] = dia_obj.setor_coberto.id
+            if dia_obj.turno_coberto:
+                turno_coberto_db.setdefault(fid, {})[dia_obj.data.day] = dia_obj.turno_coberto.id
 
     for dia in range(1, dias_mes + 1):
-        for turno in turnos:
-            funcionarios_turno = Funcionario.objects.filter(
-                tipo='REGULAR', ativo=True, turno=turno
+        for st in setor_turnos:
+            funcionarios_st = Funcionario.objects.filter(
+                tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno
             )
+            if not funcionarios_st.exists():
+                continue
 
             regulares = sum(
-                1 for func in funcionarios_turno
+                1 for func in funcionarios_st
                 if escala_gerada.get(func.id, {}).get(dia, 'TRABALHA') == 'TRABALHA'
             )
-
             folguistas = sum(
-                1 for fid, dias_turno in turno_coberto_db.items()
-                if dias_turno.get(dia) == turno.id
+                1 for fid in setor_coberto_db
+                if setor_coberto_db[fid].get(dia) == st.setor.id
+                and turno_coberto_db.get(fid, {}).get(dia) == st.turno.id
                 and escala_gerada.get(fid, {}).get(dia) == 'TRABALHA'
             )
-
             trabalhando = regulares + folguistas
 
-            if trabalhando < turno.minimo_funcionarios:
+            if trabalhando < st.minimo_funcionarios:
                 problemas_lotacao.append(
                     f"⚠️ DIA {dia:02d}/{escala.mes:02d} - "
-                    f"Turno {turno.nome}: {trabalhando}/{turno.minimo_funcionarios}"
+                    f"{st.setor.nome}/{st.turno.nome}: {trabalhando}/{st.minimo_funcionarios}"
                 )
     
     if problemas_lotacao:
@@ -659,23 +682,28 @@ def _cria_consecutivas(funcionario, escala, dia_origem, dia_destino):
 
 
 def _mantem_lotacao_minima(turno, escala, data_origem, data_destino):
-    """Verifica se mantém lotação mínima nos dois dias"""
+    """Verifica se mantém lotação mínima nos dois dias (por setor×turno)"""
+    from .models import SetorTurno
+    setor_turnos = SetorTurno.objects.filter(turno=turno).select_related('setor')
+
     for data in [data_origem, data_destino]:
-        trabalhando = DiaEscala.objects.filter(
-            escala=escala,
-            data=data,
-            funcionario__turno=turno,
-            situacao='TRABALHA'
-        ).count()
-        
-        if data == data_origem:
-            trabalhando += 1
-        elif data == data_destino:
-            trabalhando -= 1
-        
-        if trabalhando < turno.minimo_funcionarios:
-            return False
-    
+        for st in setor_turnos:
+            trabalhando = DiaEscala.objects.filter(
+                escala=escala,
+                data=data,
+                funcionario__turno=turno,
+                funcionario__grupo=st.setor,
+                situacao='TRABALHA'
+            ).count()
+
+            if data == data_origem:
+                trabalhando += 1
+            elif data == data_destino:
+                trabalhando -= 1
+
+            if trabalhando < st.minimo_funcionarios:
+                return False
+
     return True
 
 
@@ -1039,7 +1067,7 @@ def configuracao_view(request):
 
 @login_required
 def grupo_lista(request):
-    grupos = Grupo.objects.all()
+    grupos = Grupo.objects.prefetch_related('turnos_operados__turno').all()
     return render(request, 'escala/grupo_lista.html', {'grupos': grupos})
 
 @login_required
@@ -1047,10 +1075,12 @@ def grupo_novo(request):
     if request.method == 'POST':
         nome = request.POST.get('nome', '').strip()
         if nome:
-            Grupo.objects.get_or_create(nome=nome)
+            grupo, _ = Grupo.objects.get_or_create(nome=nome)
+            _salvar_setor_turnos(request, grupo)
             messages.success(request, f'✅ Grupo "{nome}" cadastrado!')
         return redirect('escala:grupo_lista')
-    return render(request, 'escala/grupo_form.html', {})
+    turnos = Turno.objects.all()
+    return render(request, 'escala/grupo_form.html', {'turnos': turnos})
 
 @login_required
 def grupo_editar(request, pk):
@@ -1060,9 +1090,29 @@ def grupo_editar(request, pk):
         if nome:
             grupo.nome = nome
             grupo.save()
+            _salvar_setor_turnos(request, grupo)
             messages.success(request, f'✅ Grupo atualizado!')
         return redirect('escala:grupo_lista')
-    return render(request, 'escala/grupo_form.html', {'grupo': grupo})
+    turnos = Turno.objects.all()
+    setor_turnos = {st.turno_id: st for st in SetorTurno.objects.filter(setor=grupo)}
+    return render(request, 'escala/grupo_form.html', {
+        'grupo': grupo,
+        'turnos': turnos,
+        'setor_turnos': setor_turnos,
+    })
+
+
+def _salvar_setor_turnos(request, grupo):
+    """Lê turno_id[] e minimo_turno_<id>[] do POST e atualiza SetorTurno."""
+    turno_ids = request.POST.getlist('turno_id[]')
+    grupo.turnos_operados.all().delete()
+    for tid in turno_ids:
+        minimo = int(request.POST.get(f'minimo_turno_{tid}', 1) or 1)
+        try:
+            turno = Turno.objects.get(id=int(tid))
+            SetorTurno.objects.create(setor=grupo, turno=turno, minimo_funcionarios=max(1, minimo))
+        except (Turno.DoesNotExist, ValueError):
+            pass
 
 @login_required
 @require_POST
@@ -1192,7 +1242,7 @@ def calendario_view(request):
     try:
         escala = Escala.objects.get(mes=mes, ano=ano)
         dias_escala = DiaEscala.objects.filter(escala=escala).select_related(
-            'funcionario', 'funcionario__turno'
+            'funcionario', 'funcionario__turno', 'turno_coberto'
         )
     except Escala.DoesNotExist:
         escala = None

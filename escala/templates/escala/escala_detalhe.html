@@ -117,9 +117,9 @@
     {% endif %}
 </div>
 
-{% for turno in turnos_data %}
+{% for setor in turnos_data %}
 <div class="turno-section section-color-{{ forloop.counter0 }}">
-    <h3>⏱ {{ turno.nome }} <small style="font-size:13px;opacity:.85;">{{ turno.horario }}</small></h3>
+    <h3>🏢 {{ setor.nome }}</h3>
     <div class="escala-container">
         <table class="tabela-escala">
             <thead>
@@ -129,13 +129,20 @@
                 </tr>
             </thead>
             <tbody>
-                {% for func in turno.funcionarios %}
+                {% for func in setor.funcionarios %}
+                {% with det=setor.func_detalhes|first %}
                 <tr>
-                    <td class="nome-funcionario">{{ func.nome }}</td>
+                    <td class="nome-funcionario">
+                        {{ func.nome }}
+                        {% with det=setor.func_detalhes %}
+                        {% for fd in det %}{% if fd.id == func.id and fd.turno_nome %}<br><small style="color:#64748b;font-weight:400;">{{ fd.turno_nome }} {{ fd.horario }}</small>{% endif %}{% endfor %}
+                        {% endwith %}
+                    </td>
                     {% for d in func.dias %}
                     <td class="{{ d.classe }} {% if d.situacao == 'FOLGA' %}draggable{% endif %}" data-funcionario-id="{{ func.id }}" data-dia="{{ forloop.counter }}" data-situacao="{{ d.situacao }}">{{ d.simbolo }}</td>
                     {% endfor %}
                 </tr>
+                {% endwith %}
                 {% endfor %}
             </tbody>
         </table>
@@ -159,7 +166,7 @@
                 <tr>
                     <td class="nome-funcionario">{{ func.nome }}</td>
                     {% for d in func.dias %}
-                    <td class="{{ d.classe }} {% if d.situacao == 'FOLGA' %}draggable{% endif %}" data-funcionario-id="{{ func.id }}" data-dia="{{ forloop.counter }}" data-situacao="{{ d.situacao }}" data-tipo="FOLGUISTA" title="{{ d.simbolo }}">{{ d.simbolo }}</td>
+                    <td class="{{ d.classe }} {% if d.situacao == 'FOLGA' %}draggable{% endif %}" data-funcionario-id="{{ func.id }}" data-dia="{{ forloop.counter }}" data-situacao="{{ d.situacao }}" data-tipo="FOLGUISTA" title="{{ d.simbolo }}" style="{% if d.situacao == 'TRABALHA' and d.simbolo != '✔' %}font-size:9px;line-height:1.1;{% endif %}">{{ d.simbolo }}</td>
                     {% endfor %}
                 </tr>
                 {% endfor %}
