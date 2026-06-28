@@ -1,11 +1,24 @@
 from django.contrib import admin
-from .models import Turno, Funcionario, Feriado, Escala, DiaEscala, Grupo
+from .models import Turno, Funcionario, Feriado, Escala, DiaEscala, Grupo, SetorTurno
+
+
+class SetorTurnoInline(admin.TabularInline):
+    model = SetorTurno
+    extra = 1
+    fields = ['turno', 'minimo_funcionarios']
 
 
 @admin.register(Grupo)
 class GrupoAdmin(admin.ModelAdmin):
     list_display = ['nome']
     search_fields = ['nome']
+    inlines = [SetorTurnoInline]
+
+
+@admin.register(SetorTurno)
+class SetorTurnoAdmin(admin.ModelAdmin):
+    list_display = ['setor', 'turno', 'minimo_funcionarios']
+    list_filter = ['setor', 'turno']
 
 
 @admin.register(Turno)

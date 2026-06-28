@@ -605,59 +605,25 @@
             {% endif %}
             
             {% if escala %}
-                {% if dia.turnos.MANHA.funcionarios %}
+                {% for turno_data in dia.turnos_lista %}
+                {% if turno_data.funcionarios %}
                 <div class="turno-info">
-                    <div class="turno-header manha">
-                        🌅 Manhã
-                        {% if dia.turnos.MANHA.atual >= dia.turnos.MANHA.minimo %}
-                        <span class="lotacao-badge lotacao-ok">{{ dia.turnos.MANHA.atual }}/{{ dia.turnos.MANHA.minimo }}</span>
+                    <div class="turno-header">
+                        {{ turno_data.nome }}
+                        {% if turno_data.atual >= turno_data.minimo %}
+                        <span class="lotacao-badge lotacao-ok">{{ turno_data.atual }}/{{ turno_data.minimo }}</span>
                         {% else %}
-                        <span class="lotacao-badge lotacao-critica">{{ dia.turnos.MANHA.atual }}/{{ dia.turnos.MANHA.minimo }}</span>
+                        <span class="lotacao-badge lotacao-critica">{{ turno_data.atual }}/{{ turno_data.minimo }}</span>
                         {% endif %}
                     </div>
                     <div class="funcionarios-lista">
-                        {% for func in dia.turnos.MANHA.funcionarios %}
+                        {% for func in turno_data.funcionarios %}
                             {{ func }}{% if not forloop.last %}, {% endif %}
                         {% endfor %}
                     </div>
                 </div>
                 {% endif %}
-                
-                {% if dia.turnos.TARDE.funcionarios %}
-                <div class="turno-info">
-                    <div class="turno-header tarde">
-                        ☀️ Tarde
-                        {% if dia.turnos.TARDE.atual >= dia.turnos.TARDE.minimo %}
-                        <span class="lotacao-badge lotacao-ok">{{ dia.turnos.TARDE.atual }}/{{ dia.turnos.TARDE.minimo }}</span>
-                        {% else %}
-                        <span class="lotacao-badge lotacao-critica">{{ dia.turnos.TARDE.atual }}/{{ dia.turnos.TARDE.minimo }}</span>
-                        {% endif %}
-                    </div>
-                    <div class="funcionarios-lista">
-                        {% for func in dia.turnos.TARDE.funcionarios %}
-                            {{ func }}{% if not forloop.last %}, {% endif %}
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endif %}
-                
-                {% if dia.turnos.NOITE.funcionarios %}
-                <div class="turno-info">
-                    <div class="turno-header noite">
-                        🌙 Noite
-                        {% if dia.turnos.NOITE.atual >= dia.turnos.NOITE.minimo %}
-                        <span class="lotacao-badge lotacao-ok">{{ dia.turnos.NOITE.atual }}/{{ dia.turnos.NOITE.minimo }}</span>
-                        {% else %}
-                        <span class="lotacao-badge lotacao-critica">{{ dia.turnos.NOITE.atual }}/{{ dia.turnos.NOITE.minimo }}</span>
-                        {% endif %}
-                    </div>
-                    <div class="funcionarios-lista">
-                        {% for func in dia.turnos.NOITE.funcionarios %}
-                            {{ func }}{% if not forloop.last %}, {% endif %}
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endif %}
+                {% endfor %}
                 
                 {% if dia.eh_passado and dia.total_ocorrencias > 0 %}
                 <div class="ocorrencias-badge">
@@ -772,30 +738,25 @@ function abrirDetalhes(numeroDia) {
         `;
     }
     
-    if (temEscala && (dia.turnos.MANHA.funcionarios.length > 0 || dia.turnos.TARDE.funcionarios.length > 0 || dia.turnos.NOITE.funcionarios.length > 0)) {
+    const turnosComFuncionarios = (dia.turnos_lista || []).filter(t => t.funcionarios.length > 0);
+    if (temEscala && turnosComFuncionarios.length > 0) {
         conteudo += '<div class="modal-section"><div class="section-titulo">👥 Escalas dos Turnos</div>';
-        
-        ['MANHA', 'TARDE', 'NOITE'].forEach(t => {
-            const turnoData = dia.turnos[t];
-            const nomesTurnos = { 'MANHA': '🌅 Turno Manhã', 'TARDE': '☀️ Turno Tarde', 'NOITE': '🌙 Turno Noite' };
-            const classesTurnos = { 'MANHA': 'manha', 'TARDE': 'tarde', 'NOITE': 'noite' };
-            
-            if (turnoData.funcionarios.length > 0) {
-                const lotacaoOk = turnoData.atual >= turnoData.minimo;
-                conteudo += `
-                    <div class="turno-card ${classesTurnos[t]}">
-                        <div class="turno-card-header">
-                            <div class="turno-nome">${nomesTurnos[t]}</div>
-                            <div class="turno-lotacao ${lotacaoOk ? 'ok' : 'critica'}">
-                                ${turnoData.atual}/${turnoData.minimo}
-                            </div>
-                        </div>
-                        <div class="funcionarios-grid">
-                            ${turnoData.funcionarios.map(f => `<div class="funcionario-item">${f}</div>`).join('')}
+
+        turnosComFuncionarios.forEach(turnoData => {
+            const lotacaoOk = turnoData.atual >= turnoData.minimo;
+            conteudo += `
+                <div class="turno-card">
+                    <div class="turno-card-header">
+                        <div class="turno-nome">${turnoData.nome}</div>
+                        <div class="turno-lotacao ${lotacaoOk ? 'ok' : 'critica'}">
+                            ${turnoData.atual}/${turnoData.minimo}
                         </div>
                     </div>
-                `;
-            }
+                    <div class="funcionarios-grid">
+                        ${turnoData.funcionarios.map(f => `<div class="funcionario-item">${f}</div>`).join('')}
+                    </div>
+                </div>
+            `;
         });
         conteudo += '</div>';
     } else if (!temEscala) {

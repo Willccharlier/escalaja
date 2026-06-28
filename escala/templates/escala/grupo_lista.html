@@ -13,6 +13,7 @@
       <tr style="background:#f1f5f9;">
         <th style="padding:12px 16px;text-align:left;">Nome</th>
         <th style="padding:12px 16px;text-align:left;">Funcionários</th>
+        <th style="padding:12px 16px;text-align:left;">Turnos operados</th>
         <th style="padding:12px 16px;text-align:right;">Ações</th>
       </tr>
     </thead>
@@ -21,6 +22,15 @@
       <tr style="border-top:1px solid #e2e8f0;">
         <td style="padding:12px 16px;font-weight:600;">{{ g.nome }}</td>
         <td style="padding:12px 16px;color:#64748b;">{{ g.funcionario_set.count }} funcionário(s)</td>
+        <td style="padding:12px 16px;">
+          {% for st in g.turnos_operados.all %}
+            <span style="display:inline-block;background:#e0f2fe;color:#0369a1;border-radius:6px;padding:2px 10px;font-size:13px;margin:2px;">
+              {{ st.turno.nome }} <span style="opacity:0.7;">(mín. {{ st.minimo_funcionarios }})</span>
+            </span>
+          {% empty %}
+            <span style="color:#94a3b8;font-size:13px;">Nenhum turno configurado</span>
+          {% endfor %}
+        </td>
         <td style="padding:12px 16px;text-align:right;">
           <a href="{% url 'escala:grupo_editar' g.pk %}" class="btn btn-sm" style="margin-right:6px;">✏️ Editar</a>
           <form method="POST" action="{% url 'escala:grupo_deletar' g.pk %}" style="display:inline;"

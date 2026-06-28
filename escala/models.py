@@ -36,6 +36,38 @@ class Grupo(models.Model):
 
 
 # =========================
+# SETOR + TURNO (mínimos)
+# =========================
+class SetorTurno(models.Model):
+    """Define quais turnos um setor opera e o mínimo de funcionários por turno."""
+    setor = models.ForeignKey(
+        Grupo, on_delete=models.CASCADE,
+        related_name='turnos_operados'
+    )
+    turno = models.ForeignKey(
+        'Turno', on_delete=models.CASCADE,
+        related_name='setores_operados'
+    )
+    minimo_funcionarios = models.IntegerField(
+        default=1, validators=[MinValueValidator(1)],
+        help_text='Mínimo de funcionários neste setor neste turno'
+    )
+    permite_zero = models.BooleanField(
+        default=False,
+        help_text='Se marcado, este setor/turno pode ficar com zero funcionários sem gerar alerta'
+    )
+
+    class Meta:
+        unique_together = ['setor', 'turno']
+        ordering = ['setor__nome', 'turno__horario_entrada']
+        verbose_name = 'Setor × Turno'
+        verbose_name_plural = 'Setores × Turnos'
+
+    def __str__(self):
+        return f'{self.setor.nome} — {self.turno.nome} (mín. {self.minimo_funcionarios})'
+
+
+# =========================
 # FUNCIONÁRIO
 # =========================
 class Funcionario(models.Model):
@@ -176,6 +208,12 @@ class DiaEscala(models.Model):
         null=True, blank=True,
         related_name='dias_cobertos',
         help_text='Turno coberto pelo folguista neste dia'
+    )
+    setor_coberto = models.ForeignKey(
+        'Grupo', on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='dias_cobertos',
+        help_text='Setor coberto pelo folguista neste dia'
     )
 
     class Meta:
