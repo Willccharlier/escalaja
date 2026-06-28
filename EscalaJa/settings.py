@@ -127,4 +127,15 @@ LOGOUT_REDIRECT_URL = 'escala:login'
 STATIC_ROOT = '/root/escalaja/static/'
 STATIC_URL = '/static/'
 
+MEDIA_ROOT = '/root/escalaja/media/'
+MEDIA_URL = '/media/'
+
+CSRF_TRUSTED_ORIGINS = [
+    'https://cod.dev.br',
+    'http://cod.dev.br',
+    'https://cod.dev.br:8009',
+    'http://cod.dev.br:8009',
+]
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 

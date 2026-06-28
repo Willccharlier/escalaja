@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minhas Ocorrências — EscalaJa</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { min-height: 100vh; background: #0f172a; font-family: 'Segoe UI', system-ui, sans-serif; color: #f1f5f9; }
+
+.navbar {
+  background: #1e293b; border-bottom: 1px solid #0f172a;
+  padding: 0 20px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+.nav-brand { display: flex; align-items: center; gap: 10px; }
+.nav-logo { width: 36px; height: 36px; background: linear-gradient(135deg,#6366f1,#3b82f6); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.nav-title { font-size: 15px; font-weight: 700; color: #f1f5f9; }
+.nav-sub   { font-size: 11px; color: #64748b; }
+.btn-voltar { background: #0f172a; border: 1.5px solid #334155; color: #94a3b8; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; text-decoration: none; }
+.btn-voltar:hover { color: #f1f5f9; border-color: #475569; }
+
+.content { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+
+.page-title { font-size: 18px; font-weight: 800; color: #f1f5f9; margin-bottom: 16px; }
+
+.oc-card {
+  background: #1e293b; border-radius: 12px; padding: 16px 18px; margin-bottom: 10px;
+  border-left: 4px solid transparent;
+}
+.oc-card.pendente   { border-color: #ef4444; }
+.oc-card.analisando { border-color: #f59e0b; }
+.oc-card.finalizada { border-color: #10b981; }
+
+.oc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 8px; }
+.oc-tipo { font-size: 14px; font-weight: 700; color: #f1f5f9; }
+.oc-data { font-size: 11px; color: #475569; }
+
+.badge {
+  font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 8px;
+}
+.badge.pendente   { background: rgba(239,68,68,0.15);   color: #fca5a5; }
+.badge.analisando { background: rgba(245,158,11,0.15);  color: #fcd34d; }
+.badge.finalizada { background: rgba(16,185,129,0.15);  color: #6ee7b7; }
+
+.oc-descricao { font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+
+.oc-resposta {
+  background: #0f172a; border-radius: 8px; padding: 10px 14px; margin-top: 8px;
+}
+.oc-resposta-label { font-size: 10px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+.oc-resposta-texto { font-size: 13px; color: #f1f5f9; }
+
+.oc-meta { font-size: 11px; color: #334155; margin-top: 8px; }
+
+.vazio { text-align: center; padding: 60px 20px; color: #475569; }
+.vazio .icon { font-size: 48px; margin-bottom: 14px; }
+
+.btn-nova {
+  display: block; width: 100%; padding: 13px;
+  background: linear-gradient(135deg,#f59e0b,#d97706);
+  color: #000; border: none; border-radius: 12px;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  margin-bottom: 20px; text-align: center; text-decoration: none;
+}
+.nav-user { display:flex; align-items:center; gap:10px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-brand">
+    <div class="nav-logo">📋</div>
+    <div>
+      <div class="nav-title">EscalaJa</div>
+      <div class="nav-sub">Portal do Funcionário</div>
+    </div>
+  </div>
+  <div class="nav-user">
+    <a href="{% url 'escala:minha_escala' %}" class="btn-voltar">← Voltar</a>
+  </div>
+</nav>
+
+<div class="content">
+  <div class="page-title">⚠️ Minhas Ocorrências</div>
+
+  <button class="btn-nova" onclick="document.getElementById('modal-oc').style.display='flex'">
+    + Registrar Nova Ocorrência
+  </button>
+
+  {% if ocorrencias %}
+  {% for oc in ocorrencias %}
+  <div class="oc-card {% if oc.status == 'FINALIZADA' %}finalizada{% elif oc.status == 'ANALISANDO' %}analisando{% else %}pendente{% endif %}">
+    <div class="oc-top">
+      <span class="oc-tipo">{{ oc.get_tipo_display }}</span>
+      <span class="badge {% if oc.status == 'FINALIZADA' %}finalizada{% elif oc.status == 'ANALISANDO' %}analisando{% else %}pendente{% endif %}">
+        {% if oc.status == 'FINALIZADA' %}✓ Finalizada{% elif oc.status == 'ANALISANDO' %}🔍 Analisando{% else %}● Pendente{% endif %}
+      </span>
+    </div>
+    <div class="oc-data">{{ oc.data_ocorrencia|date:"d/m/Y" }} · Enviado {{ oc.data_criacao|date:"d/m H:i" }}</div>
+    {% if oc.descricao %}<div class="oc-descricao" style="margin-top:6px;">{{ oc.descricao }}</div>{% endif %}
+    {% if oc.arquivo %}<div style="margin-top:4px;"><a href="{{ oc.arquivo.url }}" target="_blank" style="color:#6366f1;font-size:12px;text-decoration:none;">📎 Ver anexo</a></div>{% endif %}
+    {% if oc.resposta %}
+    <div class="oc-resposta">
+      <div class="oc-resposta-label">💬 Resposta do gestor</div>
+      <div class="oc-resposta-texto">{{ oc.resposta }}</div>
+      {% if oc.visto_por %}<div style="font-size:10px;color:#475569;margin-top:4px;">{{ oc.visto_por.get_full_name|default:oc.visto_por.username }} — {{ oc.visto_em|date:"d/m/Y H:i" }}</div>{% endif %}
+    </div>
+    {% elif oc.visto_em %}
+    <div class="oc-meta">Visualizado por {{ oc.visto_por.get_full_name|default:oc.visto_por.username }} em {{ oc.visto_em|date:"d/m/Y H:i" }} · Sem resposta ainda</div>
+    {% else %}
+    <div class="oc-meta">Aguardando visualização do gestor</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="vazio">
+    <div class="icon">✅</div>
+    <p>Nenhuma ocorrência registrada.</p>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Modal nova ocorrência ── #}
+<div id="modal-oc" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1e293b;border-radius:16px;width:100%;max-width:440px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #0f172a;display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-size:16px;font-weight:700;color:#f1f5f9;">⚠️ Registrar Ocorrência</span>
+      <button onclick="document.getElementById('modal-oc').style.display='none'" style="background:none;border:none;color:#64748b;font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <form method="POST" action="{% url 'escala:registrar_ocorrencia' %}" enctype="multipart/form-data" style="padding:20px 24px 24px;">
+      {% csrf_token %}
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Tipo</label>
+        <select name="tipo" style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+          <option value="ATRASO">⏰ Atraso</option>
+          <option value="ATESTADO">🩺 Atestado Médico</option>
+          <option value="OUTRO">📝 Outro</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Data da ocorrência</label>
+        <input type="date" name="data_ocorrencia" value="{{ hoje|date:'Y-m-d' }}"
+               style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Descrição</label>
+        <textarea name="descricao" rows="3" placeholder="Descreva brevemente o que aconteceu..."
+                  style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Anexo</label>
+        <input type="file" name="arquivo" accept="image/*,application/pdf" capture="environment"
+               style="width:100%;padding:10px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;">
+        <div style="font-size:11px;color:#475569;margin-top:4px;">No celular: abre câmera ou galeria.</div>
+      </div>
+      <button type="submit" style="width:100%;padding:13px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">
+        Enviar Ocorrência
+      </button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function() {
+  let snapshot = {};
+
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 150, 300].forEach(delay => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.3, ctx.currentTime + delay/1000);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay/1000 + 0.25);
+        o.start(ctx.currentTime + delay/1000);
+        o.stop(ctx.currentTime + delay/1000 + 0.25);
+      });
+    } catch(e) {}
+  }
+
+  function mostrarAlerta(msg) {
+    let el = document.getElementById('oc-notif');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'oc-notif';
+      el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:99999;' +
+        'background:#1e293b;border:2px solid #6366f1;border-radius:14px;padding:16px 22px;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5);max-width:340px;width:90%;text-align:center;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `<div style="font-size:22px;margin-bottom:6px;">🔔</div>
+      <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;">${msg}</div>
+      <button style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px;">
+        Recarregar
+      </button>`;
+    el.querySelector('button').onclick = () => location.reload();
+    el.style.display = 'block';
+    beep();
+    setTimeout(() => { if(el) el.style.display='none'; }, 12000);
+  }
+
+  function verificar() {
+    fetch('{% url "escala:api_minhas_ocorrencias_status" %}')
+      .then(r => r.json())
+      .then(data => {
+        data.items.forEach(oc => {
+          const prev = snapshot[oc.id];
+          if (prev) {
+            if (prev.status !== oc.status) {
+              const labels = {ANALISANDO:'Analisando', FINALIZADA:'Finalizada', PENDENTE:'Pendente'};
+              mostrarAlerta(`Status atualizado: ${labels[oc.status] || oc.status}`);
+            } else if (!prev.resposta && oc.resposta) {
+              mostrarAlerta('Sua ocorrência recebeu uma resposta!');
+            }
+          }
+          snapshot[oc.id] = { status: oc.status, resposta: oc.resposta };
+        });
+      }).catch(() => {});
+  }
+
+  fetch('{% url "escala:api_minhas_ocorrencias_status" %}')
+    .then(r => r.json())
+    .then(data => {
+      data.items.forEach(oc => { snapshot[oc.id] = { status: oc.status, resposta: oc.resposta }; });
+      setInterval(verificar, 30000);
+    }).catch(() => {});
+})();
+</script>
+</body>
+</html>

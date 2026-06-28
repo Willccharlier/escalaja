@@ -209,6 +209,9 @@
             <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
                 📱 QR Code
             </a>
+            <a href="{% url 'escala:logs_acesso_funcionario' func.pk %}" class="btn-small" style="background:#0f172a;border:1.5px solid #334155;color:#94a3b8;">
+                🕓 Acessos
+            </a>
             {% if func.perfil %}
             <span style="font-size:11px;color:#6ee7b7;font-weight:600;">✅ Tem acesso</span>
             <form method="POST" action="{% url 'escala:resetar_senha_funcionario' func.pk %}"
@@ -283,6 +286,9 @@
             </a>
             <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
                 📱 QR Code
+            </a>
+            <a href="{% url 'escala:logs_acesso_funcionario' func.pk %}" class="btn-small" style="background:#0f172a;border:1.5px solid #334155;color:#94a3b8;">
+                🕓 Acessos
             </a>
             {% if func.perfil %}
             <span style="font-size:11px;color:#6ee7b7;font-weight:600;">✅ Tem acesso</span>

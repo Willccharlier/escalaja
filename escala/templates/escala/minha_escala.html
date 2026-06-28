@@ -179,6 +179,32 @@ body {
 
 .sem-escala { text-align: center; padding: 48px 20px; color: #475569; }
 .sem-escala .icon { font-size: 44px; margin-bottom: 14px; }
+
+/* ── Semana nav ── */
+.semana-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #1e293b; border-radius: 10px;
+  padding: 10px 16px; margin-bottom: 10px;
+}
+.semana-btn {
+  background: #0f172a; border: 1.5px solid #334155;
+  color: #94a3b8; border-radius: 8px;
+  width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; text-decoration: none; font-weight: 700;
+  transition: color 0.15s, border-color 0.15s;
+}
+.semana-btn:hover { color: #f1f5f9; border-color: #6366f1; }
+.semana-label { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+
+/* ── Botão ocorrência ── */
+.btn-ocorrencia {
+  width: 100%; padding: 13px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #000; border: none; border-radius: 12px;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  margin-bottom: 14px; transition: opacity 0.15s;
+}
+.btn-ocorrencia:hover { opacity: 0.9; }
 </style>
 </head>
 <body>
@@ -277,28 +303,22 @@ body {
   </div>
   {% endif %}
 
-  {# ── NAVEGAÇÃO MÊS ── #}
-  <div class="mes-nav">
-    <form method="GET">
-      <select name="mes" class="mes-select">
-        {% for m in meses %}<option value="{{ m.num }}" {% if m.num == mes %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}
-      </select>
-      <select name="ano" class="mes-select" style="max-width:86px;">
-        {% for a in anos %}<option value="{{ a }}" {% if a == ano %}selected{% endif %}>{{ a }}</option>{% endfor %}
-      </select>
-      <button type="submit" class="btn-ver">Ver</button>
-    </form>
+  {# ── BOTÃO OCORRÊNCIA ── #}
+  <button class="btn-ocorrencia" onclick="document.getElementById('modal-ocorrencia').style.display='flex'">
+    ⚠️ Registrar Ocorrência
+  </button>
+
+  {# ── SEMANA ATUAL ── #}
+  <div class="semana-nav">
+    <a href="?semana={{ semana_offset|add:'-1' }}" class="semana-btn">‹</a>
+    <span class="semana-label">
+      {% if semana_offset == 0 %}Esta semana{% elif semana_offset == -1 %}Semana passada{% elif semana_offset == 1 %}Próxima semana{% else %}{{ ini_semana|date:"d/m" }} – {{ fim_semana|date:"d/m" }}{% endif %}
+    </span>
+    <a href="?semana={{ semana_offset|add:'1' }}" class="semana-btn">›</a>
   </div>
 
-  {# ── LISTA DO MÊS ── #}
-  {% if not escala %}
-  <div class="sem-escala">
-    <div class="icon">📭</div>
-    <p>Nenhuma escala gerada para {{ mes_nome }} {{ ano }}.</p>
-  </div>
-  {% else %}
-  <div class="mes-titulo">{{ mes_nome }} {{ ano }}</div>
-  {% for dia in dias %}
+  {% if dias_semana %}
+  {% for dia in dias_semana %}
   <div class="dia-item
     {% if dia.situacao == 'TRABALHA' %}trabalha
     {% elif dia.situacao == 'FOLGA' or dia.situacao == 'FOLGA_COMPENSADA' %}folga
@@ -331,8 +351,66 @@ body {
     </div>
   </div>
   {% endfor %}
+  {% else %}
+  <div class="sem-escala">
+    <div class="icon">📭</div>
+    <p>Sem escala para esta semana.</p>
+  </div>
   {% endif %}
 
+  {# ── LINK OCORRÊNCIAS ── #}
+  <a href="{% url 'escala:minhas_ocorrencias' %}" style="display:flex;align-items:center;justify-content:space-between;background:#1e293b;border-radius:12px;padding:14px 18px;margin-top:14px;text-decoration:none;border:1.5px solid #334155;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">📋</span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:#f1f5f9;">Minhas Ocorrências</div>
+        <div style="font-size:12px;color:#64748b;">Ver histórico e respostas do gestor</div>
+      </div>
+    </div>
+    <span style="color:#64748b;font-size:18px;">›</span>
+  </a>
+
+</div>
+
+{# ── MODAL OCORRÊNCIA ── #}
+<div id="modal-ocorrencia" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1e293b;border-radius:16px;width:100%;max-width:440px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #0f172a;display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-size:16px;font-weight:700;color:#f1f5f9;">⚠️ Registrar Ocorrência</span>
+      <button onclick="document.getElementById('modal-ocorrencia').style.display='none'" style="background:none;border:none;color:#64748b;font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <form method="POST" action="{% url 'escala:registrar_ocorrencia' %}" enctype="multipart/form-data" style="padding:20px 24px 24px;">
+      {% csrf_token %}
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Tipo</label>
+        <select name="tipo" style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+          <option value="ATRASO">⏰ Atraso</option>
+          <option value="ATESTADO">🩺 Atestado Médico</option>
+          <option value="OUTRO">📝 Outro</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Data da ocorrência</label>
+        <input type="date" name="data_ocorrencia" value="{{ hoje|date:'Y-m-d' }}"
+               style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Descrição</label>
+        <textarea name="descricao" rows="3" placeholder="Descreva brevemente o que aconteceu..."
+                  style="width:100%;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Anexo (atestado, foto, documento)</label>
+        <input type="file" name="arquivo" accept="image/*,application/pdf"
+               capture="environment"
+               style="width:100%;padding:10px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;">
+        <div style="font-size:11px;color:#475569;margin-top:4px;">No celular: abre câmera ou galeria. No computador: selecione arquivo.</div>
+      </div>
+      <button type="submit" style="width:100%;padding:13px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">
+        Enviar Ocorrência
+      </button>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -384,7 +462,142 @@ function tick() {
 }
 
 if (turno) { tick(); setInterval(tick, 1000); }
+
+// ── Polling de ocorrências do funcionário ──
+(function() {
+  // snapshot inicial: {id: {status, resposta, visto_em}}
+  let snapshot = {};
+
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 150, 300].forEach(delay => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.3, ctx.currentTime + delay/1000);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay/1000 + 0.25);
+        o.start(ctx.currentTime + delay/1000);
+        o.stop(ctx.currentTime + delay/1000 + 0.25);
+      });
+    } catch(e) {}
+  }
+
+  function mostrarAlerta(msg) {
+    let el = document.getElementById('oc-notif');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'oc-notif';
+      el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:99999;' +
+        'background:#1e293b;border:2px solid #6366f1;border-radius:14px;padding:16px 22px;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5);max-width:340px;width:90%;text-align:center;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `<div style="font-size:22px;margin-bottom:6px;">🔔</div>
+      <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;">${msg}</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:12px;">Acesse "Minhas Ocorrências" para ver a resposta.</div>
+      <button onclick="this.parentElement.style.display='none'"
+        style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;">
+        Ver agora
+      </button>`;
+    el.querySelector('button').onclick = () => {
+      el.style.display = 'none';
+      window.location.href = '{% url "escala:minhas_ocorrencias" %}';
+    };
+    el.style.display = 'block';
+    beep();
+    setTimeout(() => { if(el) el.style.display='none'; }, 12000);
+  }
+
+  function verificar() {
+    fetch('{% url "escala:api_minhas_ocorrencias_status" %}')
+      .then(r => r.json())
+      .then(data => {
+        data.items.forEach(oc => {
+          const prev = snapshot[oc.id];
+          if (prev) {
+            const statusMudou   = prev.status   !== oc.status;
+            const respostaNova  = !prev.resposta && oc.resposta;
+            if (statusMudou || respostaNova) {
+              if (oc.resposta && respostaNova) {
+                mostrarAlerta('Sua ocorrência recebeu uma resposta!');
+              } else if (statusMudou) {
+                const labels = {ANALISANDO:'Analisando', FINALIZADA:'Finalizada', PENDENTE:'Pendente'};
+                mostrarAlerta(`Status atualizado: ${labels[oc.status] || oc.status}`);
+              }
+            }
+          }
+          snapshot[oc.id] = { status: oc.status, resposta: oc.resposta };
+        });
+      }).catch(() => {});
+  }
+
+  // Inicializa snapshot sem alertar
+  fetch('{% url "escala:api_minhas_ocorrencias_status" %}')
+    .then(r => r.json())
+    .then(data => {
+      data.items.forEach(oc => { snapshot[oc.id] = { status: oc.status, resposta: oc.resposta }; });
+      setInterval(verificar, 30000);
+    }).catch(() => {});
+})();
 </script>
+
+{% if request.GET.oc_ok %}
+{% with tipo=request.GET.tipo %}
+<div id="modal-oc-ok" style="display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1e293b;border-radius:20px;width:100%;max-width:420px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.6);">
+
+    <!-- Cabeçalho verde -->
+    <div style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;text-align:center;">
+      <div style="font-size:48px;margin-bottom:8px;">✅</div>
+      <div style="font-size:18px;font-weight:800;color:#fff;">Ocorrência registrada com sucesso!</div>
+    </div>
+
+    <div style="padding:22px 24px 8px;">
+      <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:14px;">
+        O sistema registrou sua ocorrência e você pode consultá-la a qualquer momento na tela <strong style="color:#f1f5f9;">Minha Escala</strong>.
+        Esta ocorrência pode levar até <strong style="color:#f1f5f9;">48 horas</strong> para ser visualizada pelo gestor.
+        Verifique o status para saber se já foi vista e se há resposta.
+      </p>
+
+      <!-- Bloco de atenção — sempre visível -->
+      <div style="background:rgba(239,68,68,0.1);border:1.5px solid #ef4444;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+        <div style="font-size:13px;font-weight:800;color:#ef4444;margin-bottom:6px;">⚠️ ATENÇÃO</div>
+        <div style="font-size:13px;color:#fca5a5;line-height:1.5;">
+          Caso seja algo <strong>urgente</strong>, seu supervisor deve ser comunicado <strong>imediatamente</strong>.
+          Não aguarde o retorno do sistema.
+        </div>
+      </div>
+
+      {% if tipo == 'ATESTADO' or tipo == 'ATRASO' %}
+      <!-- Destaque extra para atestado/atraso -->
+      <div style="background:rgba(245,158,11,0.12);border:1.5px solid #f59e0b;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+        <div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:6px;">
+          {% if tipo == 'ATESTADO' %}🩺 Atestado Médico{% else %}⏰ Atraso{% endif %} — Entre em contato com o supervisor
+        </div>
+        <div style="font-size:13px;color:#fcd34d;line-height:1.5;">
+          {% if tipo == 'ATESTADO' %}
+          Atestados médicos precisam ser entregues ao RH. Comunique seu supervisor sobre sua ausência o quanto antes.
+          {% else %}
+          Atrasos devem ser comunicados diretamente ao supervisor antes ou durante o ocorrido.
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="padding:0 24px 24px;">
+      <button onclick="document.getElementById('modal-oc-ok').style.display='none'"
+              style="width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#3b82f6);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">
+        Entendido
+      </button>
+    </div>
+
+  </div>
+</div>
+{% endwith %}
+{% endif %}
 
 </body>
 </html>

@@ -864,6 +864,10 @@
                             <i data-lucide="layers"></i>
                             <span>Grupos/Setores</span>
                         </a>
+                        <a href="{% url 'escala:ocorrencias_lista' %}" class="dropdown-item">
+                            <i data-lucide="alert-triangle"></i>
+                            <span>Ocorrências</span>
+                        </a>
                         <a href="{% url 'escala:configuracao' %}" class="dropdown-item">
                             <i data-lucide="settings-2"></i>
                             <span>Configurações</span>
@@ -964,6 +968,10 @@
                 <a href="{% url 'escala:grupo_lista' %}" class="sidebar-link">
                     <i data-lucide="layers"></i>
                     <span>Grupos/Setores</span>
+                </a>
+                <a href="{% url 'escala:ocorrencias_lista' %}" class="sidebar-link">
+                    <i data-lucide="alert-triangle"></i>
+                    <span>Ocorrências</span>
                 </a>
                 <a href="{% url 'escala:configuracao' %}" class="sidebar-link">
                     <i data-lucide="settings-2"></i>

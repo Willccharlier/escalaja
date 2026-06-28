@@ -288,3 +288,56 @@ class TokenCadastroFuncionario(models.Model):
 
     def __str__(self):
         return f'Token {self.funcionario.nome}'
+
+
+# =========================
+# LOG DE ACESSO FUNCIONÁRIO
+# =========================
+class LogAcessoFuncionario(models.Model):
+    funcionario = models.ForeignKey(Funcionario, on_delete=models.CASCADE, related_name='logs_acesso')
+    data_hora   = models.DateTimeField(auto_now_add=True)
+    ip          = models.GenericIPAddressField(null=True, blank=True)
+    user_agent  = models.TextField(blank=True)
+    dispositivo = models.CharField(max_length=20, blank=True)  # Celular / Computador / Tablet
+
+    class Meta:
+        ordering = ['-data_hora']
+
+    def __str__(self):
+        return f'{self.funcionario.nome} — {self.data_hora:%d/%m/%Y %H:%M}'
+
+
+# =========================
+# OCORRÊNCIAS
+# =========================
+class Ocorrencia(models.Model):
+    TIPO_CHOICES = [
+        ('ATRASO',    'Atraso'),
+        ('ATESTADO',  'Atestado Médico'),
+        ('OUTRO',     'Outro'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDENTE',    'Pendente'),
+        ('ANALISANDO',  'Analisando'),
+        ('FINALIZADA',  'Finalizada'),
+    ]
+
+    funcionario     = models.ForeignKey(Funcionario, on_delete=models.CASCADE, related_name='ocorrencias')
+    tipo            = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    descricao       = models.TextField(blank=True)
+    arquivo         = models.FileField(upload_to='ocorrencias/', null=True, blank=True)
+    data_ocorrencia = models.DateField(default=date.today)
+    status          = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDENTE')
+    data_criacao    = models.DateTimeField(auto_now_add=True)
+
+    # Campos de gestão
+    resposta        = models.TextField(blank=True)
+    visto_por       = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='ocorrencias_vistas')
+    visto_em        = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-data_criacao']
+        verbose_name = 'Ocorrência'
+
+    def __str__(self):
+        return f'{self.funcionario.nome} — {self.get_tipo_display()} ({self.data_ocorrencia})'

@@ -196,6 +196,104 @@
             setInterval(tick, 1000);
         }
     });
+
+    // ── Polling de ocorrências (a cada 30s) ──
+    let _ocCount = {{ ocorrencias_pendentes|length }};
+
+    function beepGestor() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [[0,660],[200,880],[400,1100]].forEach(([delay, freq]) => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.connect(g); g.connect(ctx.destination);
+                o.frequency.value = freq;
+                g.gain.setValueAtTime(0.3, ctx.currentTime + delay/1000);
+                g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay/1000 + 0.3);
+                o.start(ctx.currentTime + delay/1000);
+                o.stop(ctx.currentTime + delay/1000 + 0.3);
+            });
+        } catch(e) {}
+    }
+
+    function mostrarAlertaGestor(novas) {
+        let el = document.getElementById('gestor-notif');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'gestor-notif';
+            el.style.cssText = 'position:fixed;top:70px;right:20px;z-index:99999;' +
+                'background:#1e293b;border:2px solid #f59e0b;border-radius:14px;padding:16px 20px;' +
+                'box-shadow:0 8px 32px rgba(0,0,0,0.5);max-width:300px;';
+            document.body.appendChild(el);
+        }
+        el.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:24px;">🚨</span>
+                <div>
+                    <div style="font-size:14px;font-weight:800;color:#f59e0b;">Nova Ocorrência!</div>
+                    <div style="font-size:12px;color:#94a3b8;">${novas} ocorrência${novas>1?'s':''} pendente${novas>1?'s':''}</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="{% url 'escala:ocorrencias_lista' %}?status=PENDENTE"
+                   style="flex:1;padding:8px;background:#f59e0b;color:#000;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;">
+                   Ver agora
+                </a>
+                <button onclick="this.parentElement.parentElement.style.display='none'"
+                   style="padding:8px 12px;background:#0f172a;border:1.5px solid #334155;color:#94a3b8;border-radius:8px;font-size:13px;cursor:pointer;">
+                   ✕
+                </button>
+            </div>`;
+        el.style.display = 'block';
+        beepGestor();
+        setTimeout(() => { if(el) el.style.display='none'; }, 15000);
+    }
+
+    function verificarOcorrencias() {
+        fetch('{% url "escala:api_ocorrencias_count" %}')
+            .then(r => r.json())
+            .then(data => {
+                if (data.count > _ocCount) {
+                    mostrarAlertaGestor(data.count);
+                }
+                _ocCount = data.count;
+                const badge = document.getElementById('oc-badge');
+                if (badge) badge.textContent = data.count;
+            }).catch(() => {});
+    }
+    setInterval(verificarOcorrencias, 30000);
 </script>
+
+{% if ocorrencias_pendentes %}
+<div style="margin-top:28px;">
+  <h3 style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:12px;">
+    ⚠️ Ocorrências Pendentes
+    <span style="background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;">{{ ocorrencias_pendentes|length }}</span>
+  </h3>
+  {% for oc in ocorrencias_pendentes %}
+  <div style="background:#1e293b;border-radius:12px;padding:14px 18px;margin-bottom:8px;border-left:4px solid {% if oc.tipo == 'ATESTADO' %}#06b6d4{% elif oc.tipo == 'ATRASO' %}#f59e0b{% else %}#6366f1{% endif %};display:flex;align-items:flex-start;gap:14px;">
+    <div style="flex:1;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:13px;font-weight:700;color:#f1f5f9;">{{ oc.funcionario.nome }}</span>
+        <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:8px;
+          {% if oc.tipo == 'ATESTADO' %}background:rgba(6,182,212,0.15);color:#67e8f9;
+          {% elif oc.tipo == 'ATRASO' %}background:rgba(245,158,11,0.15);color:#fcd34d;
+          {% else %}background:rgba(99,102,241,0.15);color:#a5b4fc;{% endif %}">
+          {{ oc.get_tipo_display }}
+        </span>
+        <span style="font-size:11px;color:#475569;">{{ oc.data_ocorrencia|date:"d/m/Y" }}</span>
+      </div>
+      {% if oc.descricao %}<div style="font-size:12px;color:#94a3b8;">{{ oc.descricao|truncatechars:80 }}</div>{% endif %}
+      {% if oc.arquivo %}<div style="font-size:11px;margin-top:4px;">📎 <a href="{{ oc.arquivo.url }}" target="_blank" style="color:#6366f1;">Ver anexo</a></div>{% endif %}
+    </div>
+    <form method="POST" action="{% url 'escala:marcar_ocorrencia_vista' oc.pk %}">
+      {% csrf_token %}
+      <button type="submit" style="background:#0f172a;border:1.5px solid #334155;color:#94a3b8;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+        ✓ Marcar visto
+      </button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 {% endblock %}

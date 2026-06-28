@@ -1,0 +1,48 @@
+{% extends 'escala/base.html' %}
+{% block title %}Logs de Acesso — {{ func.nome }}{% endblock %}
+{% block content %}
+
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+  <a href="{% url 'escala:funcionario_lista' %}" style="color:#94a3b8;text-decoration:none;font-size:13px;">← Funcionários</a>
+  <h2 style="margin:0;">📱 Acessos de {{ func.nome }}</h2>
+</div>
+
+{% if logs %}
+<div style="background:#1e293b;border-radius:12px;overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead>
+      <tr style="background:#0f172a;">
+        <th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Data/Hora</th>
+        <th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Dispositivo</th>
+        <th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">IP</th>
+        <th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Navegador / Aparelho</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr style="border-top:1px solid #0f172a;">
+        <td style="padding:11px 16px;font-size:13px;color:#f1f5f9;white-space:nowrap;">{{ log.data_hora|date:"d/m/Y H:i" }}</td>
+        <td style="padding:11px 16px;">
+          <span style="font-size:12px;font-weight:600;padding:2px 10px;border-radius:8px;
+            {% if log.dispositivo == 'Celular' %}background:rgba(16,185,129,0.15);color:#6ee7b7;
+            {% elif log.dispositivo == 'Tablet' %}background:rgba(245,158,11,0.15);color:#fcd34d;
+            {% else %}background:rgba(99,102,241,0.15);color:#a5b4fc;{% endif %}">
+            {% if log.dispositivo == 'Celular' %}📱{% elif log.dispositivo == 'Tablet' %}📟{% else %}💻{% endif %}
+            {{ log.dispositivo }}
+          </span>
+        </td>
+        <td style="padding:11px 16px;font-size:12px;color:#94a3b8;font-family:monospace;">{{ log.ip|default:"—" }}</td>
+        <td style="padding:11px 16px;font-size:11px;color:#64748b;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ log.user_agent }}">{{ log.user_agent|truncatechars:60 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div style="text-align:center;padding:60px 20px;color:#475569;">
+  <div style="font-size:48px;margin-bottom:14px;">📭</div>
+  <p>Nenhum acesso registrado para {{ func.nome }}.</p>
+</div>
+{% endif %}
+
+{% endblock %}

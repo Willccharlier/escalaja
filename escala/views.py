@@ -11,6 +11,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -27,7 +28,7 @@ from django.contrib.auth.models import User
 from .models import (
     Escala, DiaEscala, Funcionario, Turno, Feriado,
     ConfiguracaoSistema, Grupo, SetorTurno,
-    PerfilFuncionario, TokenCadastroFuncionario,
+    PerfilFuncionario, TokenCadastroFuncionario, Ocorrencia, LogAcessoFuncionario,
 )
 from .services import GeradorEscala
 
@@ -162,6 +163,8 @@ def dashboard(request):
     funcionarios_turno_anterior = _funcionarios_no_turno(data_turno_anterior, turno_anterior)
     funcionarios_turno_proximo = _funcionarios_no_turno(fim_data, turno_proximo)
 
+    ocorrencias_pendentes = Ocorrencia.objects.filter(status__in=['PENDENTE', 'ANALISANDO']).select_related('funcionario').order_by('-data_criacao')
+
     context = {
         'turno_atual': turno_atual,
         'turno_anterior': turno_anterior,
@@ -172,6 +175,7 @@ def dashboard(request):
         'progresso_turno': round(progresso_turno, 1),
         'tempo_restante': tempo_restante,
         'tempo_para_proximo': tempo_para_proximo,
+        'ocorrencias_pendentes': ocorrencias_pendentes,
     }
 
     return render(request, 'escala/dashboard.html', context)
@@ -1825,7 +1829,7 @@ def calendario_view(request):
         escala = None
         dias_escala = []
     
-    # Buscar feriados do mês
+    # Buscar feriados e ocorrências do mês
     data_inicio = date(ano, mes, 1)
     dias_mes = monthrange(ano, mes)[1]
     data_fim = date(ano, mes, dias_mes)
@@ -1835,6 +1839,15 @@ def calendario_view(request):
         data__lte=data_fim
     )
     feriados_dict = {f.data.day: f for f in feriados}
+
+    # Ocorrências do mês agrupadas por dia
+    ocorrencias_mes = Ocorrencia.objects.filter(
+        data_ocorrencia__gte=data_inicio,
+        data_ocorrencia__lte=data_fim,
+    ).select_related('funcionario').order_by('data_ocorrencia')
+    ocorrencias_por_dia = {}
+    for oc in ocorrencias_mes:
+        ocorrencias_por_dia.setdefault(oc.data_ocorrencia.day, []).append(oc)
 
     # Buscar turnos reais do banco (ordenados por horário)
     turnos_db = list(Turno.objects.all().order_by('horario_entrada'))
@@ -1880,6 +1893,7 @@ def calendario_view(request):
         turnos_lista = list(turnos_info.values())
         feriado_obj = feriados_dict.get(dia)
 
+        ocs_dia = ocorrencias_por_dia.get(dia, [])
         dia_info = {
             'dia': dia,
             'data': data,
@@ -1892,6 +1906,7 @@ def calendario_view(request):
             'feriado': feriado_obj,
             'turnos': turnos_info,
             'turnos_lista': turnos_lista,
+            'ocorrencias': ocs_dia,
         }
 
         calendario_dias.append(dia_info)
@@ -1911,6 +1926,18 @@ def calendario_view(request):
                 'eh_dia_util': feriado_obj.eh_dia_util()
             } if feriado_obj else None,
             'turnos_lista': turnos_lista,
+            'ocorrencias': [
+                {
+                    'funcionario__nome': oc.funcionario.nome,
+                    'tipo__nome': oc.get_tipo_display(),
+                    'tipo__gravidade': 'CRITICA' if oc.tipo == 'ATESTADO' else 'INFO' if oc.tipo == 'ATRASO' else '',
+                    'data_hora_formatada': oc.data_criacao.strftime('%d/%m %H:%M'),
+                    'descricao': oc.descricao,
+                    'status': oc.status,
+                    'arquivo': oc.arquivo.url if oc.arquivo else None,
+                }
+                for oc in ocs_dia
+            ],
         }
 
         calendario_dias_json.append(dia_info_json)
@@ -1961,6 +1988,25 @@ def _get_client_ip(request):
     return request.META.get('REMOTE_ADDR', '')
 
 
+def _detectar_dispositivo(user_agent):
+    ua = user_agent.lower()
+    if any(k in ua for k in ('iphone', 'android', 'mobile', 'blackberry', 'windows phone')):
+        return 'Celular'
+    if any(k in ua for k in ('ipad', 'tablet')):
+        return 'Tablet'
+    return 'Computador'
+
+
+def _registrar_acesso(request, funcionario):
+    ua = request.META.get('HTTP_USER_AGENT', '')
+    LogAcessoFuncionario.objects.create(
+        funcionario=funcionario,
+        ip=_get_client_ip(request),
+        user_agent=ua,
+        dispositivo=_detectar_dispositivo(ua),
+    )
+
+
 @csrf_exempt
 def portal_funcionario(request):
     """Página única do QR Code: login ou cadastro conforme o estado."""
@@ -1994,6 +2040,7 @@ def portal_funcionario(request):
                 if user:
                     from django.contrib.auth import login as auth_login
                     auth_login(request, user)
+                    _registrar_acesso(request, perfil.funcionario)
                     return redirect('escala:minha_escala')
                 erro = 'Senha incorreta.'
             else:
@@ -2055,6 +2102,7 @@ def portal_funcionario(request):
                 )
                 from django.contrib.auth import login as auth_login
                 auth_login(request, user)
+                _registrar_acesso(request, func)
                 messages.success(request, f'Bem-vindo(a), {func.nome.split()[0]}!')
                 return redirect('escala:minha_escala')
 
@@ -2173,6 +2221,7 @@ def cadastro_funcionario(request):
 
             from django.contrib.auth import login as auth_login
             auth_login(request, user)
+            _registrar_acesso(request, func)
             messages.success(request, f'Bem-vindo(a), {func.nome.split()[0]}! Acesso criado com sucesso.')
             return redirect('escala:minha_escala')
 
@@ -2287,10 +2336,32 @@ def minha_escala(request):
 
     meses_nav = [{'num': m, 'nome': MESES_PT[m]} for m in range(1, 13)]
 
+    # Semana atual
+    dia_semana = hoje.weekday()  # 0=seg
+    ini_semana = hoje - timedelta(days=dia_semana)
+    fim_semana = ini_semana + timedelta(days=6)
+
+    # Offset de semanas via GET
+    semana_offset = int(request.GET.get('semana', 0))
+    ini_semana += timedelta(weeks=semana_offset)
+    fim_semana += timedelta(weeks=semana_offset)
+
+    dias_semana = [d for d in dias if ini_semana <= d.data <= fim_semana]
+
+    dias_semana = [d for d in dias if ini_semana <= d.data <= fim_semana]
+
+    minhas_ocorrencias = Ocorrencia.objects.filter(
+        funcionario=func
+    ).order_by('-data_criacao')[:10]
+
     return render(request, 'escala/minha_escala.html', {
         'func': func,
         'escala': escala,
         'dias': dias,
+        'dias_semana': dias_semana,
+        'ini_semana': ini_semana,
+        'fim_semana': fim_semana,
+        'semana_offset': semana_offset,
         'mes': mes,
         'ano': ano,
         'mes_nome': MESES_PT[mes],
@@ -2301,7 +2372,105 @@ def minha_escala(request):
         'turno_hoje': turno_hoje,
         'colegas_hoje': colegas_hoje,
         'turno_json': json.dumps(turno_json),
+        'minhas_ocorrencias': minhas_ocorrencias,
     })
+
+
+@login_required
+def logs_acesso_funcionario(request, pk):
+    func = get_object_or_404(Funcionario, pk=pk)
+    logs = LogAcessoFuncionario.objects.filter(funcionario=func)[:50]
+    return render(request, 'escala/logs_acesso.html', {'func': func, 'logs': logs})
+
+
+@login_required
+def minhas_ocorrencias(request):
+    if not hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:dashboard')
+    func = request.user.perfil_funcionario.funcionario
+    ocorrencias = Ocorrencia.objects.filter(funcionario=func).order_by('-data_criacao')
+    return render(request, 'escala/minhas_ocorrencias.html', {
+        'ocorrencias': ocorrencias,
+        'func': func,
+        'hoje': date.today(),
+    })
+
+
+@login_required
+def api_minhas_ocorrencias_status(request):
+    """Polling: retorna status atual das ocorrências do funcionário logado."""
+    if not hasattr(request.user, 'perfil_funcionario'):
+        return JsonResponse({'items': []})
+    func = request.user.perfil_funcionario.funcionario
+    items = list(
+        Ocorrencia.objects.filter(funcionario=func)
+        .values('id', 'status', 'resposta', 'visto_em')
+        .order_by('-data_criacao')[:20]
+    )
+    # serializa datas
+    for i in items:
+        i['visto_em'] = i['visto_em'].isoformat() if i['visto_em'] else None
+    return JsonResponse({'items': items})
+
+
+@login_required
+def api_ocorrencias_count(request):
+    """Endpoint de polling para o dashboard verificar novas ocorrências."""
+    count = Ocorrencia.objects.filter(status__in=['PENDENTE', 'ANALISANDO']).count()
+    return JsonResponse({'count': count})
+
+
+@login_required
+def registrar_ocorrencia(request):
+    if not hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:dashboard')
+    func = request.user.perfil_funcionario.funcionario
+
+    if request.method == 'POST':
+        tipo      = request.POST.get('tipo', 'OUTRO')
+        descricao = request.POST.get('descricao', '').strip()
+        data_oco  = request.POST.get('data_ocorrencia') or date.today()
+        arquivo   = request.FILES.get('arquivo')
+
+        Ocorrencia.objects.create(
+            funcionario=func,
+            tipo=tipo,
+            descricao=descricao,
+            data_ocorrencia=data_oco,
+            arquivo=arquivo,
+        )
+        return redirect(f"{reverse('escala:minha_escala')}?oc_ok=1&tipo={tipo}")
+
+    return redirect('escala:minha_escala')
+
+
+@login_required
+def ocorrencias_lista(request):
+    status = request.GET.get('status', '')
+    qs = Ocorrencia.objects.select_related('funcionario', 'visto_por').order_by('-data_ocorrencia', '-data_criacao')
+    if status in ('PENDENTE', 'ANALISANDO', 'FINALIZADA'):
+        qs = qs.filter(status=status)
+    total_pendente = Ocorrencia.objects.filter(status='PENDENTE').count()
+    return render(request, 'escala/ocorrencias_lista.html', {
+        'ocorrencias': qs,
+        'status_filtro': status,
+        'total_pendente': total_pendente,
+    })
+
+
+@login_required
+def marcar_ocorrencia_vista(request, pk):
+    oc = get_object_or_404(Ocorrencia, pk=pk)
+    novo_status = request.POST.get('status', 'ANALISANDO')
+    resposta    = request.POST.get('resposta', '').strip()
+    if novo_status in ('PENDENTE', 'ANALISANDO', 'FINALIZADA'):
+        oc.status = novo_status
+    oc.resposta = resposta
+    if not oc.visto_em:
+        oc.visto_por = request.user
+        oc.visto_em  = timezone.now()
+    oc.save()
+    return redirect(request.META.get('HTTP_REFERER', reverse('escala:ocorrencias_lista')))
 
 
 @login_required

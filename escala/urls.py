@@ -57,6 +57,16 @@ urlpatterns = [
     path('funcionario/', views.portal_funcionario, name='portal_funcionario'),
     path('funcionario/logout/', views.logout_funcionario, name='logout_funcionario'),
     path('funcionarios/<int:pk>/resetar-senha/', views.resetar_senha_funcionario, name='resetar_senha_funcionario'),
+
+    path('funcionarios/<int:pk>/logs/', views.logs_acesso_funcionario, name='logs_acesso_funcionario'),
+
+    # Ocorrências
+    path('funcionario/ocorrencia/', views.registrar_ocorrencia, name='registrar_ocorrencia'),
+    path('funcionario/minhas-ocorrencias/', views.minhas_ocorrencias, name='minhas_ocorrencias'),
+    path('ocorrencias/', views.ocorrencias_lista, name='ocorrencias_lista'),
+    path('ocorrencias/api/count/', views.api_ocorrencias_count, name='api_ocorrencias_count'),
+    path('ocorrencias/api/meu-status/', views.api_minhas_ocorrencias_status, name='api_minhas_ocorrencias_status'),
+    path('ocorrencias/<int:pk>/vista/', views.marcar_ocorrencia_vista, name='marcar_ocorrencia_vista'),
     path('funcionario/minha-escala/', views.minha_escala, name='minha_escala'),
     path('funcionarios/<int:pk>/qrcode/', views.gerar_qrcode_funcionario, name='qrcode_funcionario'),
 ]
