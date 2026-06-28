@@ -160,6 +160,13 @@ class GeradorEscala:
                 if not prob_folgas:
                     self.alertas.append("   ✅ Folgas mensais OK!")
 
+                # 9d+9e. Loop: consecutivos ↔ folgas mensais até estabilizar (máx 3 iterações)
+                for _ in range(3):
+                    corr_pos = self._corrigir_maximos_consecutivos()
+                    if corr_pos == 0:
+                        break
+                    self._corrigir_folgas_mes()  # reajusta se consecutivos inseriu/removeu folgas
+
                 # 10. Validações finais
                 self._validar_e_alertar_consecutividade()
                 problemas_domingo = self._validar_e_alertar_domingo_folga()
@@ -649,10 +656,30 @@ class GeradorEscala:
             # Dias onde este folguista é indispensável — não pode folgar
             dias_criticos = self._dias_criticos_folguista(func)
 
-            # R1: garantir 1 domingo para o folguista (preferir não-crítico)
+            # R1: garantir 1 domingo para o folguista
+            # Preferência: domingo onde regulares já cobrem todos os setores habilitados (folguista não é necessário)
             domingos = [d for d in range(1, self.dias_mes + 1)
                         if date(self.ano, self.mes, d).weekday() == 6]
-            dom_folguista = next((d for d in domingos if d not in dias_criticos), None)
+
+            def regulares_cobrem_domingo(dom):
+                """True se regulares já atendem o mínimo em todos os setores habilitados (sem este folguista)."""
+                setores_hab = list(func.grupos_habilitados.all())
+                for st in SetorTurno.objects.filter(setor__in=setores_hab, permite_zero=False):
+                    regulares = Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno)
+                    trab = sum(1 for f in regulares if self.escala_gerada.get(f.id, {}).get(dom) == 'TRABALHA')
+                    if trab < st.minimo_funcionarios:
+                        return False
+                return True
+
+            # 1ª opção: não-crítico E regulares cobrem sozinhos
+            dom_folguista = next((d for d in domingos if d not in dias_criticos and regulares_cobrem_domingo(d)), None)
+            # 2ª opção: qualquer não-crítico
+            if dom_folguista is None:
+                dom_folguista = next((d for d in domingos if d not in dias_criticos), None)
+            # Último recurso: qualquer domingo (R1 é lei)
+            if dom_folguista is None and domingos:
+                dom_folguista = domingos[0]
+
             if dom_folguista:
                 self.escala_gerada[func.id][dom_folguista] = 'FOLGA'
                 self.domingo_garantido[func.id] = dom_folguista
@@ -862,11 +889,13 @@ class GeradorEscala:
                 contagem_st[key] = contagem_st.get(key, 0) + 1
 
     def _folgas_semana(self, func, dias_count):
-        """Retorna quantas folgas o funcionário precisa na semana, dado seu regime"""
+        """Retorna quantas folgas o funcionário precisa na semana, dado seu regime.
+        5x2: 2 folgas apenas em semana completa (7 dias); parciais recebem 1.
+        6x1: 1 folga se semana >= 4 dias."""
         if func.regime == '6x1':
             return 1 if dias_count >= 4 else 0
-        else:  # 5x2
-            if dias_count >= 5:
+        else:  # 5x2 — semana completa = 2, parcial = 1
+            if dias_count == 7:
                 return 2
             elif dias_count >= 3:
                 return 1
@@ -1315,7 +1344,7 @@ class GeradorEscala:
         domingos = {d for d in range(1, self.dias_mes + 1) if date(self.ano, self.mes, d).weekday() == 6}
         funcionarios = {
             f.id: f for f in Funcionario.objects.filter(
-                id__in=list(self.escala_gerada.keys()), tipo='REGULAR', ativo=True
+                id__in=list(self.escala_gerada.keys()), ativo=True
             ).select_related('grupo', 'turno')
         }
 
@@ -1431,6 +1460,9 @@ class GeradorEscala:
                         break
 
                     if sit_dia == 'FOLGA':
+                        # Nunca remover o domingo R1 garantido do folguista
+                        if dia in domingos and self.domingo_garantido.get(folg.id) == dia:
+                            continue  # Tentar próximo folguista
                         # Déficit sem permite_zero = folguista habilitado vai obrigatoriamente
                         self.escala_gerada[folg.id][dia] = 'TRABALHA'
                         self.setor_coberto.setdefault(folg.id, {})[dia] = st.setor.id

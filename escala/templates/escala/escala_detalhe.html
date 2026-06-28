@@ -105,10 +105,9 @@
 
 <div class="btn-group-mobile">
     <a href="{% url 'escala:exportar_escala_excel' escala.id %}" class="btn btn-success">📊 Exportar Excel</a>
-    <a href="{% url 'escala:revalidar_escala' escala.id %}" class="btn" style="background: #f59e0b;"
-       onclick="return confirm('Deseja revalidar os alertas?');">🔄 Revalidar</a>
+    <a href="{% url 'escala:revalidar_escala' escala.id %}" class="btn" style="background: #f59e0b;">🔄 Revalidar</a>
     <a href="{% url 'escala:auto_corrigir_escala' escala.id %}" class="btn" style="background: #8b5cf6; color:white;"
-       onclick="return confirm('Tentar corrigir automaticamente os problemas de lotação?');">🔧 Auto-corrigir</a>
+       >🔧 Auto-corrigir</a>
     <a href="{% url 'escala:escala_lista' %}" class="btn">← Voltar</a>
 </div>
 

@@ -191,8 +191,8 @@ def escala_detalhe(request, pk):
         for dia in range(1, dias_mes + 1):
             situacao = func_data['dias_situacao'][dia]
             classe, simbolo = SIT_MAP.get(situacao, ('', ''))
-            if situacao == 'TRABALHA' and dias_turno and dias_turno[dia]:
-                simbolo = dias_turno[dia].upper()
+            if situacao == 'TRABALHA' and dias_turno is not None:
+                simbolo = dias_turno[dia].upper() if dias_turno[dia] else '?'
             linha['dias'].append({'classe': classe, 'simbolo': simbolo, 'situacao': situacao})
         return linha
 
@@ -305,17 +305,13 @@ def gerar_escala_view(request):
         sucesso, escala, alertas = gerador.gerar()
 
         if escala is None:
-            messages.error(request, '❌ Erro crítico ao gerar escala:')
-            for alerta in alertas:
-                messages.warning(request, alerta)
+            messages.error(request, '❌ Erro crítico ao gerar escala. Verifique os detalhes do sistema.')
             return redirect('escala:gerar_escala')
 
         if sucesso:
             messages.success(request, f'✅ Escala de {mes:02d}/{ano} gerada com sucesso!')
         else:
-            messages.error(request, f'⚠️ Escala gerada com problemas. Verifique os alertas.')
-            for alerta in alertas:
-                messages.warning(request, alerta)
+            messages.error(request, f'⚠️ Escala gerada com problemas. Abra "Ver detalhes do sistema" para mais informações.')
 
         return redirect('escala:escala_detalhe', pk=escala.id)
     
@@ -328,139 +324,196 @@ def gerar_escala_view(request):
 
 @login_required
 def revalidar_escala(request, pk):
-    """Revalida uma escala existente após ajustes manuais"""
+    """Revalida uma escala — mostra todas as validações com status detalhado por funcionário/setor."""
     from calendar import monthrange
-    
+    from .models import SetorTurno
+
     escala = get_object_or_404(Escala, pk=pk)
     dias_mes = monthrange(escala.ano, escala.mes)[1]
-    
-    dias_escala = DiaEscala.objects.filter(escala=escala).select_related('funcionario', 'funcionario__turno')
-    
-    escala_gerada = {}
-    for dia_obj in dias_escala:
-        func_id = dia_obj.funcionario.id
-        if func_id not in escala_gerada:
-            escala_gerada[func_id] = {}
-        escala_gerada[func_id][dia_obj.data.day] = dia_obj.situacao
-    
-    alertas = []
     config = ConfiguracaoSistema.get()
 
-    def regime_aplica_consecutivas(regime):
-        if not config.consecutivas_ativo:
-            return False
-        return config.consecutivas_regime == 'AMBOS' or config.consecutivas_regime == regime
+    # Carregar escala em memória
+    todos_dias = list(DiaEscala.objects.filter(escala=escala).select_related(
+        'funcionario', 'funcionario__turno', 'funcionario__grupo',
+        'setor_coberto', 'turno_coberto'
+    ))
+    escala_mem = {}   # {func_id: {dia: situacao}}
+    setor_cob  = {}   # {func_id: {dia: setor_id}}
+    turno_cob  = {}   # {func_id: {dia: turno_id}}
+    for d in todos_dias:
+        fid = d.funcionario.id
+        escala_mem.setdefault(fid, {})[d.data.day] = d.situacao
+        if d.funcionario.tipo == 'FOLGUISTA':
+            if d.setor_coberto:
+                setor_cob.setdefault(fid, {})[d.data.day] = d.setor_coberto.id
+            if d.turno_coberto:
+                turno_cob.setdefault(fid, {})[d.data.day] = d.turno_coberto.id
 
-    # 1. Validar folgas consecutivas
-    alertas.append("🔍 VALIDANDO FOLGAS CONSECUTIVAS...")
-    problemas_consecutivas = []
+    funcionarios_map = {
+        f.id: f for f in Funcionario.objects.filter(
+            id__in=list(escala_mem.keys()), ativo=True
+        ).select_related('grupo', 'turno')
+    }
 
-    if not config.consecutivas_ativo:
-        alertas.append("⏭️ Regra de consecutivas desativada nas configurações")
-    else:
-        for func_id, dias_func in escala_gerada.items():
-            funcionario = Funcionario.objects.get(id=func_id)
-
-            if not regime_aplica_consecutivas(funcionario.regime):
-                continue
-
-            for dia in range(1, dias_mes):
-                if dia not in dias_func or (dia + 1) not in dias_func:
-                    continue
-                if dias_func[dia] == 'FOLGA' and dias_func[dia + 1] == 'FOLGA':
-                    problemas_consecutivas.append(f"⚠️ {funcionario.nome}: dias {dia} e {dia+1}")
-                    break
-
-        if problemas_consecutivas:
-            alertas.append("⚠️ Folgas consecutivas encontradas:")
-            alertas.extend([f"   {p}" for p in problemas_consecutivas])
-        else:
-            alertas.append("✅ Sem folgas consecutivas!")
-
-    # 2. Validar domingos de folga (apenas 6x1)
-    alertas.append("\n🔍 VALIDANDO DOMINGOS DE FOLGA...")
-
-    domingos = [
-        dia for dia in range(1, dias_mes + 1)
-        if date(escala.ano, escala.mes, dia).weekday() == 6
-    ]
-
-    problemas_domingo = []
-    if domingos:
-        for func_id, dias_func in escala_gerada.items():
-            funcionario = Funcionario.objects.get(id=func_id)
-            tem_domingo = any(
-                dias_func.get(dom, 'TRABALHA') in ['FOLGA', 'FOLGA_COMPENSADA', 'FOLGA_ANIVERSARIO', 'FOLGA_FERIADO', 'FERIAS', 'ATESTADO']
-                for dom in domingos
-            )
-            if not tem_domingo:
-                problemas_domingo.append(f"⚠️ {funcionario.nome} ({funcionario.regime})")
-
-        if problemas_domingo:
-            alertas.append("⚠️ Sem nenhum domingo de folga:")
-            alertas.extend([f"   {p}" for p in problemas_domingo])
-        else:
-            alertas.append("✅ Todos os funcionários 6x1 têm pelo menos 1 domingo de folga!")
-
-    # 3. Validar lotação mínima por setor×turno
-    alertas.append("\n🔍 VALIDANDO LOTAÇÃO MÍNIMA...")
-    from .models import SetorTurno
+    domingos = [d for d in range(1, dias_mes + 1) if date(escala.ano, escala.mes, d).weekday() == 6]
     setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
-    problemas_lotacao = []
 
-    # Montar setor_coberto e turno_coberto a partir do banco
-    setor_coberto_db = {}  # {func_id: {dia: setor_id}}
-    turno_coberto_db = {}  # {func_id: {dia: turno_id}}
-    for dia_obj in DiaEscala.objects.filter(escala=escala).select_related('setor_coberto', 'turno_coberto', 'funcionario'):
-        if dia_obj.funcionario.tipo == 'FOLGUISTA':
-            fid = dia_obj.funcionario.id
-            if dia_obj.setor_coberto:
-                setor_coberto_db.setdefault(fid, {})[dia_obj.data.day] = dia_obj.setor_coberto.id
-            if dia_obj.turno_coberto:
-                turno_coberto_db.setdefault(fid, {})[dia_obj.data.day] = dia_obj.turno_coberto.id
+    alertas = []
+    tem_erro = False
 
-    for dia in range(1, dias_mes + 1):
-        for st in setor_turnos:
-            funcionarios_st = Funcionario.objects.filter(
-                tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno
-            )
-            if not funcionarios_st.exists():
+    # ── REGRA 1: Domingo garantido (R1 — obrigatório para todos) ─────────────
+    alertas.append("═══ R1: DOMINGO GARANTIDO — 1 domingo de folga por mês ═══")
+    erros_r1 = []
+    for func_id, dias in escala_mem.items():
+        func = funcionarios_map.get(func_id)
+        if not func:
+            continue
+        dom = next((d for d in domingos if dias.get(d, 'TRABALHA') != 'TRABALHA'), None)
+        if dom:
+            alertas.append(f"   ✅ {func.nome} ({func.regime}): folga no domingo {dom:02d}/{escala.mes:02d}")
+        else:
+            erros_r1.append(f"   ❌ {func.nome} ({func.regime}): SEM DOMINGO DE FOLGA")
+            tem_erro = True
+    if erros_r1:
+        alertas.extend(erros_r1)
+    alertas.append(f"   {'✅ Todos com domingo garantido!' if not erros_r1 else f'❌ {len(erros_r1)} funcionário(s) sem domingo!'}")
+
+    # ── REGRA 2: Quantidade de folgas no mês (R2 CLT) ────────────────────────
+    alertas.append("\n═══ R2: FOLGAS MENSAIS — quantidade correta por regime ═══")
+
+    def semanas_do_mes():
+        """Divide o mês em semanas de domingo a sábado — idêntico ao services.py."""
+        semanas, semana_atual = [], []
+        for dia in range(1, dias_mes + 1):
+            wd = date(escala.ano, escala.mes, dia).weekday()
+            if wd == 6 and semana_atual:   # domingo inicia nova semana
+                semanas.append(semana_atual)
+                semana_atual = []
+            semana_atual.append(dia)
+            if wd == 5 or dia == dias_mes:  # sábado ou último dia fecha semana
+                semanas.append(semana_atual)
+                semana_atual = []
+        if semana_atual:
+            semanas.append(semana_atual)
+        return semanas
+
+    def folgas_esperadas(func):
+        semanas = semanas_do_mes()
+        total = 0
+        for s in semanas:
+            n = len(s)
+            if func.regime == '5x2':
+                total += 2 if n == 7 else (1 if n >= 3 else 0)
+            else:  # 6x1
+                total += 1 if n >= 4 else 0
+        return total
+
+    erros_r2 = []
+    for func_id, dias in escala_mem.items():
+        func = funcionarios_map.get(func_id)
+        if not func:
+            continue
+        esperado = folgas_esperadas(func)
+        real = sum(1 for s in dias.values() if s != 'TRABALHA')
+        if real == esperado:
+            alertas.append(f"   ✅ {func.nome} ({func.regime}): {real}/{esperado} folgas")
+        else:
+            erros_r2.append(f"   ❌ {func.nome} ({func.regime}): {real}/{esperado} folgas (esperado {esperado})")
+            tem_erro = True
+    if erros_r2:
+        alertas.extend(erros_r2)
+    alertas.append(f"   {'✅ Todas as folgas mensais corretas!' if not erros_r2 else f'❌ {len(erros_r2)} funcionário(s) com folgas incorretas!'}")
+
+    # ── REGRA 3: Máx consecutivos de trabalho (CLT) ───────────────────────────
+    alertas.append("\n═══ R3: CONSECUTIVOS DE TRABALHO — limite por regime ═══")
+    limite_consec = {'5x2': 5, '6x1': 6}
+    erros_r3 = []
+    for func_id, dias in escala_mem.items():
+        func = funcionarios_map.get(func_id)
+        if not func:
+            continue
+        lim = limite_consec.get(func.regime, 6)
+        maximo = consecutivos = 0
+        for d in range(1, dias_mes + 1):
+            if dias.get(d, 'TRABALHA') == 'TRABALHA':
+                consecutivos += 1
+                maximo = max(maximo, consecutivos)
+            else:
+                consecutivos = 0
+        if maximo <= lim:
+            alertas.append(f"   ✅ {func.nome} ({func.regime}): máx {maximo} dias consecutivos (limite {lim})")
+        else:
+            erros_r3.append(f"   ❌ {func.nome} ({func.regime}): {maximo} dias consecutivos — ACIMA do limite {lim}!")
+            tem_erro = True
+    if erros_r3:
+        alertas.extend(erros_r3)
+    alertas.append(f"   {'✅ Nenhuma violação de consecutivos!' if not erros_r3 else f'❌ {len(erros_r3)} funcionário(s) com consecutivos acima do limite!'}")
+
+    # ── REGRA 4: Folgas consecutivas (configurável) ───────────────────────────
+    alertas.append("\n═══ R4: FOLGAS CONSECUTIVAS (configurável) ═══")
+    if not config.consecutivas_ativo:
+        alertas.append("   ⏭️ Regra desativada nas configurações")
+    else:
+        erros_r4 = []
+        for func_id, dias in escala_mem.items():
+            func = funcionarios_map.get(func_id)
+            if not func:
                 continue
+            aplica = config.consecutivas_regime == 'AMBOS' or config.consecutivas_regime == func.regime
+            if not aplica:
+                continue
+            for d in range(1, dias_mes):
+                if dias.get(d) == 'FOLGA' and dias.get(d + 1) == 'FOLGA':
+                    erros_r4.append(f"   ❌ {func.nome}: folgas consecutivas dias {d} e {d+1}")
+                    tem_erro = True
+                    break
+            else:
+                alertas.append(f"   ✅ {func.nome}: sem folgas consecutivas")
+        if erros_r4:
+            alertas.extend(erros_r4)
+        alertas.append(f"   {'✅ Sem folgas consecutivas!' if not erros_r4 else f'❌ {len(erros_r4)} funcionário(s) com folgas consecutivas!'}")
 
-            regulares = sum(
-                1 for func in funcionarios_st
-                if escala_gerada.get(func.id, {}).get(dia, 'TRABALHA') == 'TRABALHA'
+    # ── REGRA 5: Lotação mínima ───────────────────────────────────────────────
+    alertas.append("\n═══ R5: LOTAÇÃO MÍNIMA POR SETOR/TURNO ═══")
+    erros_r5 = []
+    for st in setor_turnos:
+        funcs_st = list(Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno))
+        if not funcs_st:
+            continue
+        dias_com_erro = []
+        for dia in range(1, dias_mes + 1):
+            reg = sum(1 for f in funcs_st if escala_mem.get(f.id, {}).get(dia, 'TRABALHA') == 'TRABALHA')
+            folg = sum(
+                1 for fid in setor_cob
+                if setor_cob[fid].get(dia) == st.setor.id
+                and turno_cob.get(fid, {}).get(dia) == st.turno.id
+                and escala_mem.get(fid, {}).get(dia) == 'TRABALHA'
             )
-            folguistas = sum(
-                1 for fid in setor_coberto_db
-                if setor_coberto_db[fid].get(dia) == st.setor.id
-                and turno_coberto_db.get(fid, {}).get(dia) == st.turno.id
-                and escala_gerada.get(fid, {}).get(dia) == 'TRABALHA'
-            )
-            trabalhando = regulares + folguistas
+            total = reg + folg
+            if total < st.minimo_funcionarios and not st.permite_zero:
+                dias_com_erro.append(f"dia {dia:02d} ({total}/{st.minimo_funcionarios})")
+        if dias_com_erro:
+            erros_r5.append(f"   ❌ {st.setor.nome}/{st.turno.nome}: problemas em {', '.join(dias_com_erro)}")
+            tem_erro = True
+        else:
+            pz = " (permite zero)" if st.permite_zero else ""
+            alertas.append(f"   ✅ {st.setor.nome}/{st.turno.nome}: lotação OK em todos os dias{pz}")
+    if erros_r5:
+        alertas.extend(erros_r5)
+    alertas.append(f"   {'✅ Lotação mínima OK em todos os setores!' if not erros_r5 else f'❌ {len(erros_r5)} setor(es)/turno(s) com deficit!'}")
 
-            if trabalhando < st.minimo_funcionarios and not st.permite_zero:
-                problemas_lotacao.append(
-                    f"⚠️ DIA {dia:02d}/{escala.mes:02d} - "
-                    f"{st.setor.nome}/{st.turno.nome}: {trabalhando}/{st.minimo_funcionarios}"
-                )
-    
-    if problemas_lotacao:
-        alertas.append("⚠️ Problemas de lotação encontrados:")
-        alertas.extend([f"   {p}" for p in problemas_lotacao])
-    else:
-        alertas.append("✅ Lotação mínima OK em todos os dias!")
-    
-    if problemas_lotacao or problemas_consecutivas or (domingos and problemas_domingo):
+    # ── Resultado final ───────────────────────────────────────────────────────
+    alertas.append("\n" + "═" * 50)
+    if tem_erro:
+        alertas.append("❌ ESCALA COM PROBLEMAS — verifique os itens marcados com ❌")
         escala.gerada_com_sucesso = False
-        alertas.append("\n⚠️ Escala possui problemas pendentes")
     else:
+        alertas.append("✅ ESCALA VÁLIDA — todas as regras aprovadas!")
         escala.gerada_com_sucesso = True
-        alertas.append("\n✅ Escala válida! Todos os problemas foram corrigidos!")
-    
+
     escala.observacoes = "\n".join(alertas)
     escala.save()
-    
+
     messages.success(request, '🔄 Escala revalidada com sucesso!')
     return redirect('escala:escala_detalhe', pk=escala.id)
 
@@ -533,6 +586,122 @@ def auto_corrigir_escala(request, pk):
 
     correcoes = 0
     relatorio = []
+
+    # Carregar folguistas e coberturas logo no início (necessário para Fase 1b)
+    folguistas = list(
+        Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
+        .prefetch_related('grupos_habilitados', 'turnos_habilitados')
+    )
+    hab_setor = {f.id: set(f.grupos_habilitados.values_list('id', flat=True)) for f in folguistas}
+    hab_turno = {f.id: set(f.turnos_habilitados.values_list('id', flat=True)) for f in folguistas}
+
+    cobertura_folg = {}   # {func_id: {dia: (setor_id, turno_id)}}
+    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario', 'setor_coberto', 'turno_coberto'):
+        if d.setor_coberto and d.turno_coberto:
+            cobertura_folg.setdefault(d.funcionario.id, {})[d.data.day] = (d.setor_coberto.id, d.turno_coberto.id)
+
+    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario'):
+        fid = d.funcionario.id
+        escala_mem.setdefault(fid, {})[d.data.day] = d.situacao
+
+    mudancas_cobertura = {}  # {(func_id, dia): (setor_id, turno_id)} — novas coberturas a salvar
+
+    def folg_trabalhando_no_dia(st, dia):
+        return sum(
+            1 for fid, cobs in cobertura_folg.items()
+            if cobs.get(dia) == (st.setor.id, st.turno.id)
+            and escala_mem.get(fid, {}).get(dia) == 'TRABALHA'
+        )
+
+    # Mapa completo de funcionários (regulares + folguistas) para consulta de regime
+    todos_funcionarios = {f.id: f for funcs in regulares_por_st.values() for f in funcs}
+    todos_funcionarios.update({f.id: f for f in folguistas})
+
+    # --- FASE 0: corrigir consecutivos de trabalho (CLT) ---
+    for func_id, dias in escala_mem.items():
+        func = todos_funcionarios.get(func_id)
+        if not func:
+            continue
+        lim = limite_consec.get(func.regime, 6)
+
+        for _ in range(30):
+            # Encontrar primeira sequência que viola o limite
+            seq, violacao = [], None
+            for d in range(1, dias_mes + 1):
+                if dias.get(d, 'TRABALHA') == 'TRABALHA':
+                    seq.append(d)
+                    if len(seq) > lim:
+                        violacao = seq[:]
+                        break
+                else:
+                    seq = []
+            if not violacao:
+                break
+
+            # Tentar TROCAR: pegar folga de dia seguro e colocar no meio da violação
+            meio = violacao[len(violacao) // 2]
+
+            # Dias candidatos para "receber" a folga (meio da violação e vizinhos)
+            candidatos_destino = sorted(violacao, key=lambda d: abs(d - meio))
+
+            # Dias candidatos para "ceder" a folga (dias com folga, não domingo R1)
+            dom_r1 = domingo_folga_de(func_id)
+            candidatos_origem = [
+                d for d, s in dias.items()
+                if s == 'FOLGA' and d not in domingos_mes
+                and d != dom_r1
+                and d not in violacao
+            ]
+            # Preferir dias com mais cobertura de colegas (menos impacto ao devolver)
+            def cob_regular(dia):
+                st_func = next((st for st in setor_turnos
+                                if st.setor.id == getattr(func, 'grupo_id', None)
+                                and st.turno.id == getattr(func, 'turno_id', None)), None)
+                if not st_func:
+                    return 0
+                return trabalhando_no_dia(st_func, dia)
+
+            candidatos_origem.sort(key=cob_regular, reverse=True)
+
+            trocado = False
+            for dia_orig in candidatos_origem:
+                for dia_dest in candidatos_destino:
+                    if dia_dest == dia_orig:
+                        continue
+                    # Verificar se destino não cria deficit de lotação
+                    st_func = next((st for st in setor_turnos
+                                    if st.setor.id == getattr(func, 'grupo_id', None)
+                                    and st.turno.id == getattr(func, 'turno_id', None)), None)
+                    if st_func and not st_func.permite_zero:
+                        trab_dest = trabalhando_no_dia(st_func, dia_dest)
+                        if trab_dest < st_func.minimo_funcionarios:
+                            continue  # Criaria deficit
+                    # Fazer troca
+                    dias[dia_orig] = 'TRABALHA'
+                    dias[dia_dest] = 'FOLGA'
+                    # Verificar se resolveu sem criar nova violação
+                    nova_seq, nova_viol = [], None
+                    for d2 in range(1, dias_mes + 1):
+                        if dias.get(d2, 'TRABALHA') == 'TRABALHA':
+                            nova_seq.append(d2)
+                            if len(nova_seq) > lim:
+                                nova_viol = True
+                                break
+                        else:
+                            nova_seq = []
+                    if not nova_viol:
+                        relatorio.append(f"✅ {func.nome}: consecutivos corrigidos (folga {dia_orig:02d}→{dia_dest:02d})")
+                        correcoes += 1
+                        trocado = True
+                        break
+                    else:
+                        dias[dia_orig] = 'FOLGA'
+                        dias[dia_dest] = 'TRABALHA'
+                if trocado:
+                    break
+
+            if not trocado:
+                break  # Não conseguiu corrigir — para para este funcionário
 
     def tentar_mover_folga(func_id, dia_folga, dia_destino, st):
         """Testa mover FOLGA de dia_folga para dia_destino. Aplica em escala_mem se válido. Retorna True se funcionou."""
@@ -610,35 +779,72 @@ def auto_corrigir_escala(request, pk):
                 if trabalhando_no_dia(st, dia_prob) >= st.minimo_funcionarios:
                     break  # Este problema foi resolvido, próximo
 
+    # --- FASE 1b: deficit num domingo causado pelo domingo R1 do folguista → trocar domingo ---
+    # Lógica: se folguista tem domingo off num dia com deficit, mover o domingo dele
+    # para outro domingo do mês onde todos seus setores habilitados ficam cobertos sem ele.
+    for dom_deficit in sorted(domingos_mes):
+        for st in setor_turnos:
+            if st.permite_zero:
+                continue
+            reg = trabalhando_no_dia(st, dom_deficit)
+            folg = folg_trabalhando_no_dia(st, dom_deficit)
+            if reg + folg >= st.minimo_funcionarios:
+                continue  # Sem deficit aqui
+
+            for func in folguistas:
+                if st.setor.id not in hab_setor.get(func.id, set()):
+                    continue
+                if st.turno.id not in hab_turno.get(func.id, set()):
+                    continue
+                if escala_mem.get(func.id, {}).get(dom_deficit, 'TRABALHA') != 'FOLGA':
+                    continue
+                if domingo_folga_de(func.id) != dom_deficit:
+                    continue  # Não é o domingo R1 dele
+
+                # Tentar mover o domingo deste folguista para outro domingo do mês
+                for novo_dom in sorted(domingos_mes - {dom_deficit}):
+                    if escala_mem.get(func.id, {}).get(novo_dom, 'TRABALHA') != 'TRABALHA':
+                        continue
+
+                    # No novo domingo, todos os setores habilitados devem estar cobertos sem este folguista
+                    novo_seguro = True
+                    for st2 in setor_turnos:
+                        if st2.permite_zero:
+                            continue
+                        if st2.setor.id not in hab_setor.get(func.id, set()):
+                            continue
+                        if st2.turno.id not in hab_turno.get(func.id, set()):
+                            continue
+                        reg2 = trabalhando_no_dia(st2, novo_dom)
+                        folg2 = sum(
+                            1 for fid, cobs in cobertura_folg.items()
+                            if fid != func.id
+                            and cobs.get(novo_dom) == (st2.setor.id, st2.turno.id)
+                            and escala_mem.get(fid, {}).get(novo_dom) == 'TRABALHA'
+                        )
+                        if reg2 + folg2 < st2.minimo_funcionarios:
+                            novo_seguro = False
+                            break
+
+                    if not novo_seguro:
+                        continue
+
+                    # Troca: trabalha no domingo com deficit, folga no domingo seguro
+                    escala_mem[func.id][dom_deficit] = 'TRABALHA'
+                    escala_mem[func.id][novo_dom] = 'FOLGA'
+                    cobertura_folg.setdefault(func.id, {})[dom_deficit] = (st.setor.id, st.turno.id)
+                    mudancas_cobertura[(func.id, dom_deficit)] = (st.setor.id, st.turno.id)
+                    relatorio.append(
+                        f"✅ {func.nome}: domingo {dom_deficit:02d}→{novo_dom:02d}/{escala.mes:02d} "
+                        f"(cobrindo {st.setor.nome}/{st.turno.nome} dia {dom_deficit:02d})"
+                    )
+                    correcoes += 1
+                    break
+
+                if reg + folg_trabalhando_no_dia(st, dom_deficit) >= st.minimo_funcionarios:
+                    break  # Resolvido
+
     # --- FASE 2: déficits que regulares não resolveram → tentar folguistas habilitados ---
-    # Carregar folguistas e coberturas atuais do banco
-    folguistas = list(
-        Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
-        .prefetch_related('grupos_habilitados', 'turnos_habilitados')
-    )
-    hab_setor = {f.id: set(f.grupos_habilitados.values_list('id', flat=True)) for f in folguistas}
-    hab_turno = {f.id: set(f.turnos_habilitados.values_list('id', flat=True)) for f in folguistas}
-
-    # Coberturas atuais dos folguistas (setor_coberto e turno_coberto por dia)
-    cobertura_folg = {}   # {func_id: {dia: (setor_id, turno_id)}}
-    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario', 'setor_coberto', 'turno_coberto'):
-        if d.setor_coberto and d.turno_coberto:
-            cobertura_folg.setdefault(d.funcionario.id, {})[d.data.day] = (d.setor_coberto.id, d.turno_coberto.id)
-
-    # Adicionar folguistas ao escala_mem
-    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario'):
-        fid = d.funcionario.id
-        escala_mem.setdefault(fid, {})[d.data.day] = d.situacao
-
-    mudancas_cobertura = {}  # {(func_id, dia): (setor_id, turno_id)} — novas coberturas a salvar
-
-    def folg_trabalhando_no_dia(st, dia):
-        return sum(
-            1 for fid, cobs in cobertura_folg.items()
-            if cobs.get(dia) == (st.setor.id, st.turno.id)
-            and escala_mem.get(fid, {}).get(dia) == 'TRABALHA'
-        )
-
     for dia in range(1, dias_mes + 1):
         for st in setor_turnos:
             if st.permite_zero or not regulares_por_st.get((st.setor.id, st.turno.id)):
@@ -666,6 +872,9 @@ def auto_corrigir_escala(request, pk):
                     break
 
                 if sit == 'FOLGA':
+                    # Nunca remover o domingo R1 do folguista
+                    if dia in domingos_mes and domingo_folga_de(func.id) == dia:
+                        continue  # Tentar próximo folguista
                     # Déficit sem permite_zero = folguista habilitado vai obrigatoriamente
                     escala_mem[func.id][dia] = 'TRABALHA'
                     cobertura_folg.setdefault(func.id, {})[dia] = (st.setor.id, st.turno.id)
@@ -726,8 +935,10 @@ def auto_corrigir_escala(request, pk):
         escala.observacoes = "\n".join(alertas) + "\n\n---\n" + obs_anterior
         escala.save()
 
-    messages.success(request, f'🔧 Auto-correção concluída: {correcoes} ajuste(s).')
-    return redirect('escala:escala_detalhe', pk=escala.id)
+    msg = f'🔧 Auto-correção concluída: {correcoes} ajuste(s).' if correcoes else 'ℹ️ Nenhum ajuste possível sem violar outras regras.'
+    messages.success(request, msg)
+    # Redirecionar para revalidar para atualizar status completo (R1 + folgas + lotação)
+    return redirect('escala:revalidar_escala', pk=escala.id)
 
 
 @login_required
@@ -1185,144 +1396,180 @@ def turno_deletar(request, pk):
 
 @login_required
 def exportar_escala_excel(request, pk):
-    """Exporta escala para Excel com formatação"""
+    """Exporta escala para Excel — mesmo layout da tela: por setor, ordenado por turno, folguistas no final."""
     escala = get_object_or_404(Escala, pk=pk)
-    
-    # Criar workbook
-    wb = Workbook()
-    
-    # Buscar dados
     dias_mes = monthrange(escala.ano, escala.mes)[1]
-    dias_escala = DiaEscala.objects.filter(escala=escala).select_related('funcionario', 'funcionario__turno')
-    
-    # Organizar por turno (dinâmico — aceita qualquer nome de turno)
-    turnos_ordem = list(Turno.objects.values_list('nome', flat=True).order_by('horario_entrada'))
-    turnos_data = {nome: {} for nome in turnos_ordem}
 
-    for dia_obj in dias_escala:
-        turno_nome = dia_obj.funcionario.turno.nome
-        func_id = dia_obj.funcionario.id
-        func_nome = dia_obj.funcionario.nome
-
-        if turno_nome not in turnos_data:
-            turnos_data[turno_nome] = {}
-
-        if func_id not in turnos_data[turno_nome]:
-            turnos_data[turno_nome][func_id] = {
-                'nome': func_nome,
-                'dias': {}
-            }
-
-        turnos_data[turno_nome][func_id]['dias'][dia_obj.data.day] = dia_obj.situacao
-
-    # Criar abas por turno
-    cores = {
-        'TRABALHA': 'D4EDDA',
-        'FOLGA': 'F8D7DA',
-        'FOLGA_COMPENSADA': 'FFE0B2',
-        'FALTA': 'EF9A9A',
-        'ATESTADO': 'E1BEE7',
-        'FERIAS': 'B3E5FC',
-        'FOLGA_ANIVERSARIO': 'FFF3CD',
-        'FOLGA_FERIADO': 'D1ECF1',
+    # ── Cores e símbolos ──────────────────────────────────────────────────────
+    CORES = {
+        'TRABALHA': 'D4EDDA', 'FOLGA': 'F8D7DA', 'FOLGA_COMPENSADA': 'FFE0B2',
+        'FALTA': 'EF9A9A', 'ATESTADO': 'E1BEE7', 'FERIAS': 'B3E5FC',
     }
-
-    simbolos = {
-        'TRABALHA': '✓',
-        'FOLGA': 'F',
-        'FOLGA_COMPENSADA': 'C',
-        'FALTA': 'FT',
-        'ATESTADO': 'AF',
-        'FERIAS': 'FB',
-        'FOLGA_ANIVERSARIO': '🎂',
-        'FOLGA_FERIADO': '🎉',
+    SIMBOLOS = {
+        'TRABALHA': '✓', 'FOLGA': 'F', 'FOLGA_COMPENSADA': 'C',
+        'FALTA': 'FT', 'ATESTADO': 'AF', 'FERIAS': 'FB',
     }
-    
-    dias_semana = {0: 'SEG', 1: 'TER', 2: 'QUA', 3: 'QUI', 4: 'SEX', 5: 'SAB', 6: 'DOM'}
-    
-    # Remover aba padrão
-    wb.remove(wb.active)
-    
-    for turno_nome in turnos_ordem:
-        if not turnos_data.get(turno_nome):
-            continue
-            
-        ws = wb.create_sheet(title=f"Turno {turno_nome.title()}")
-        
-        # Título
-        ws.merge_cells('A1:AH1')
-        ws['A1'] = f'ESCALA {escala.mes:02d}/{escala.ano} - TURNO {turno_nome}'
-        ws['A1'].font = Font(size=14, bold=True)
-        ws['A1'].alignment = Alignment(horizontal='center')
-        
-        # Cabeçalho da tabela
-        ws['A3'] = 'FUNCIONÁRIO'
-        ws['A3'].font = Font(bold=True)
-        ws['A3'].fill = PatternFill(start_color='ECF0F1', end_color='ECF0F1', fill_type='solid')
-        
-        # Dias do mês
+    ORDEM_TURNO = {'MANHA': 0, 'INTERMEDIARIO': 1, 'TARDE': 2, 'NOITE': 3}
+    DIAS_SEM = {0: 'SEG', 1: 'TER', 2: 'QUA', 3: 'QUI', 4: 'SEX', 5: 'SAB', 6: 'DOM'}
+    HEADER_CORES = ['F39C12', 'E74C3C', '34495E', '8E44AD', '16A085']
+
+    thin = Border(left=Side(style='thin'), right=Side(style='thin'),
+                  top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # ── Carregar dados ────────────────────────────────────────────────────────
+    dias_qs = list(DiaEscala.objects.filter(escala=escala).select_related(
+        'funcionario', 'funcionario__grupo', 'funcionario__turno',
+        'setor_coberto', 'turno_coberto'
+    ))
+
+    # Situação por funcionário e dia
+    sit_map = {}       # {func_id: {dia: situacao}}
+    cobertura_map = {} # {func_id: {dia: "SETOR/TUR"}}  — folguistas
+    for d in dias_qs:
+        fid = d.funcionario.id
+        sit_map.setdefault(fid, {})[d.data.day] = d.situacao
+        if d.funcionario.tipo == 'FOLGUISTA' and d.setor_coberto and d.turno_coberto:
+            label = f"{d.setor_coberto.nome[:3]}/{d.turno_coberto.nome[0]}"
+            cobertura_map.setdefault(fid, {})[d.data.day] = label
+
+    # Regulares agrupados por setor
+    regulares = Funcionario.objects.filter(tipo='REGULAR', ativo=True).select_related('grupo', 'turno')
+    setores_map = {}  # {setor_nome: [func, ...]}
+    for f in regulares:
+        if f.grupo:
+            setores_map.setdefault(f.grupo.nome, []).append(f)
+    # Ordenar funcionários dentro de cada setor por turno
+    for nome in setores_map:
+        setores_map[nome].sort(key=lambda f: (ORDEM_TURNO.get(f.turno.nome.upper() if f.turno else '', 99), f.nome))
+
+    # Folguistas
+    folguistas = list(Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True).order_by('nome'))
+
+    # ── Criar workbook — uma aba única ───────────────────────────────────────
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Escala {escala.mes:02d}-{escala.ano}"
+
+    # Título geral
+    total_cols = dias_mes + 2  # nome + turno + dias
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    ws['A1'] = f'ESCALA {escala.mes:02d}/{escala.ano}'
+    ws['A1'].font = Font(size=16, bold=True)
+    ws['A1'].alignment = Alignment(horizontal='center')
+    ws['A1'].fill = PatternFill(start_color='2C3E50', end_color='2C3E50', fill_type='solid')
+    ws['A1'].font = Font(size=16, bold=True, color='FFFFFF')
+    ws.row_dimensions[1].height = 28
+
+    cur_row = 2  # linha atual de escrita
+
+    def escrever_cabecalho_dias(row):
+        ws.cell(row=row, column=1).value = 'FUNCIONÁRIO'
+        ws.cell(row=row, column=2).value = 'TURNO'
+        for c in [1, 2]:
+            ws.cell(row=row, column=c).font = Font(bold=True, size=9)
+            ws.cell(row=row, column=c).fill = PatternFill(start_color='BDC3C7', end_color='BDC3C7', fill_type='solid')
+            ws.cell(row=row, column=c).alignment = Alignment(horizontal='center', vertical='center')
         for dia in range(1, dias_mes + 1):
-            col = dia + 1
-            data = date(escala.ano, escala.mes, dia)
-            dia_semana_nome = dias_semana[data.weekday()]
-            
-            cell = ws.cell(row=3, column=col)
-            cell.value = f"{dia}\n{dia_semana_nome}"
-            cell.font = Font(bold=True, size=9)
+            col = dia + 2
+            d = date(escala.ano, escala.mes, dia)
+            cell = ws.cell(row=row, column=col)
+            cell.value = f"{dia}\n{DIAS_SEM[d.weekday()]}"
+            cell.font = Font(bold=True, size=8)
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            
-            # Destaque para domingos
-            if data.weekday() == 6:
-                cell.fill = PatternFill(start_color='FFC107', end_color='FFC107', fill_type='solid')
+            cor = 'F1C40F' if d.weekday() == 6 else 'BDC3C7'
+            cell.fill = PatternFill(start_color=cor, end_color=cor, fill_type='solid')
+        ws.row_dimensions[row].height = 28
+
+    def escrever_funcionario(row, func, label_turno, dias_sit, dias_label=None):
+        ws.cell(row=row, column=1).value = func.nome
+        ws.cell(row=row, column=1).font = Font(bold=True, size=9)
+        ws.cell(row=row, column=2).value = label_turno
+        ws.cell(row=row, column=2).font = Font(size=8, color='444444')
+        ws.cell(row=row, column=2).alignment = Alignment(horizontal='center', vertical='center')
+        for dia in range(1, dias_mes + 1):
+            col = dia + 2
+            sit = dias_sit.get(dia, 'TRABALHA')
+            cell = ws.cell(row=row, column=col)
+            if dias_label:
+                cell.value = dias_label.get(dia, SIMBOLOS.get(sit, '✓'))
             else:
-                cell.fill = PatternFill(start_color='ECF0F1', end_color='ECF0F1', fill_type='solid')
-        
-        # Dados dos funcionários
-        row = 4
-        for func_id, func_data in sorted(turnos_data[turno_nome].items(), key=lambda x: x[1]['nome']):
-            ws.cell(row=row, column=1).value = func_data['nome']
-            ws.cell(row=row, column=1).font = Font(bold=True)
-            
+                cell.value = SIMBOLOS.get(sit, '✓')
+            cell.font = Font(size=8)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cor = CORES.get(sit, 'FFFFFF')
+            cell.fill = PatternFill(start_color=cor, end_color=cor, fill_type='solid')
+        for col in range(1, total_cols + 1):
+            ws.cell(row=row, column=col).border = thin
+
+    # ── Seções por setor ─────────────────────────────────────────────────────
+    for idx, (setor_nome, funcs) in enumerate(sorted(setores_map.items())):
+        # Header do setor
+        ws.merge_cells(start_row=cur_row, start_column=1, end_row=cur_row, end_column=total_cols)
+        cell = ws.cell(row=cur_row, column=1)
+        cell.value = f'🏢 {setor_nome.upper()}'
+        cell.font = Font(bold=True, size=11, color='FFFFFF')
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cor_header = HEADER_CORES[idx % len(HEADER_CORES)]
+        cell.fill = PatternFill(start_color=cor_header, end_color=cor_header, fill_type='solid')
+        ws.row_dimensions[cur_row].height = 20
+        cur_row += 1
+
+        # Cabeçalho de dias
+        escrever_cabecalho_dias(cur_row)
+        cur_row += 1
+
+        # Funcionários
+        for func in funcs:
+            turno_label = func.turno.nome if func.turno else ''
+            escrever_funcionario(cur_row, func, turno_label, sit_map.get(func.id, {}))
+            cur_row += 1
+
+        cur_row += 1  # Espaço entre setores
+
+    # ── Seção folguistas ─────────────────────────────────────────────────────
+    if folguistas:
+        ws.merge_cells(start_row=cur_row, start_column=1, end_row=cur_row, end_column=total_cols)
+        cell = ws.cell(row=cur_row, column=1)
+        cell.value = '🔄 FOLGUISTAS — cobertura de turnos'
+        cell.font = Font(bold=True, size=11, color='FFFFFF')
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.fill = PatternFill(start_color='2980B9', end_color='2980B9', fill_type='solid')
+        ws.row_dimensions[cur_row].height = 20
+        cur_row += 1
+
+        escrever_cabecalho_dias(cur_row)
+        cur_row += 1
+
+        for func in folguistas:
+            dias_cob = cobertura_map.get(func.id, {})
+            dias_sit = sit_map.get(func.id, {})
+            # Para folguistas: mostrar cobertura quando TRABALHA, F quando FOLGA
+            dias_label = {}
             for dia in range(1, dias_mes + 1):
-                col = dia + 1
-                situacao = func_data['dias'].get(dia, 'TRABALHA')
-                
-                cell = ws.cell(row=row, column=col)
-                cell.value = simbolos.get(situacao, '')
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-                
-                # Aplicar cor
-                if situacao in cores:
-                    cell.fill = PatternFill(start_color=cores[situacao], end_color=cores[situacao], fill_type='solid')
-            
-            row += 1
-        
-        # Ajustar largura das colunas
-        ws.column_dimensions['A'].width = 25
-        for col in range(2, dias_mes + 2):
-            ws.column_dimensions[ws.cell(row=3, column=col).column_letter].width = 5
-        
-        # Altura da linha do cabeçalho
-        ws.row_dimensions[3].height = 30
-        
-        # Bordas
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        
-        for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=dias_mes + 1):
-            for cell in row:
-                cell.border = thin_border
-    
-    # Preparar resposta HTTP
+                sit = dias_sit.get(dia, 'TRABALHA')
+                if sit != 'TRABALHA':
+                    dias_label[dia] = SIMBOLOS.get(sit, 'F')
+                elif dia in dias_cob:
+                    dias_label[dia] = dias_cob[dia]
+                else:
+                    dias_label[dia] = '✓'
+            escrever_funcionario(cur_row, func, 'FOLGUISTA', dias_sit, dias_label)
+            cur_row += 1
+
+    # ── Largura das colunas ───────────────────────────────────────────────────
+    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['B'].width = 14
+    for dia in range(1, dias_mes + 1):
+        col_letter = ws.cell(row=3, column=dia + 2).column_letter
+        ws.column_dimensions[col_letter].width = 7
+
+    # Congelar painel após nome+turno
+    ws.freeze_panes = 'C2'
+
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
     response['Content-Disposition'] = f'attachment; filename="Escala_{escala.mes:02d}_{escala.ano}.xlsx"'
-    
     wb.save(response)
     return response
 

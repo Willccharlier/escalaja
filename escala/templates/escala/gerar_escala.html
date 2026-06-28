@@ -3,212 +3,281 @@
 
 {% block content %}
 <style>
-.gerar-card {
-  max-width: 420px;
-  margin: 0 auto;
-  background: #1e293b;
-  border-radius: 16px;
-  padding: 28px 24px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-}
-
-.gerar-titulo {
-  font-size: 20px;
-  font-weight: 700;
-  color: #fff;
-  margin: 0 0 24px 0;
+.page-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.page-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
 }
 
-.gerar-grid {
+.card {
+  background: #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  max-width: 520px;
+}
+
+.card-section {
+  padding: 20px 24px;
+  border-bottom: 1px solid #0f172a;
+}
+.card-section:last-child { border-bottom: none; }
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #64748b;
+  margin-bottom: 14px;
+}
+
+.periodo-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
 }
 
-.gerar-campo label {
+.campo label {
   display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #94a3b8;
+  font-size: 12px;
   font-weight: 600;
-  margin-bottom: 8px;
+  color: #94a3b8;
+  margin-bottom: 6px;
 }
 
-.gerar-campo select,
-.gerar-campo input[type="number"] {
+.campo select,
+.campo input[type="number"] {
   width: 100%;
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: #0f172a;
-  border: 2px solid #334155;
-  border-radius: 10px;
+  border: 1.5px solid #334155;
+  border-radius: 8px;
   color: #f1f5f9;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   box-sizing: border-box;
   appearance: none;
   -webkit-appearance: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.15s;
 }
-
-.gerar-campo select:focus,
-.gerar-campo input[type="number"]:focus {
+.campo select:focus,
+.campo input[type="number"]:focus {
   outline: none;
   border-color: #3b82f6;
 }
-
-.gerar-campo select {
+.campo select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 14px center;
-  padding-right: 40px;
+  background-position: right 12px center;
+  padding-right: 36px;
 }
 
-.gerar-checkbox-label {
+.toggle-row {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  background: #0f172a;
-  border: 2px solid #334155;
-  border-radius: 10px;
-  cursor: pointer;
-  margin-bottom: 24px;
-  transition: border-color 0.2s;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
-
-.gerar-checkbox-label:has(input:checked) {
-  border-color: #f59e0b;
-  background: rgba(245,158,11,0.08);
-}
-
-.gerar-checkbox-label input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  accent-color: #f59e0b;
-  margin-top: 1px;
-  cursor: pointer;
-}
-
-.gerar-checkbox-texto {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.gerar-checkbox-titulo {
+.toggle-info strong {
+  display: block;
   font-size: 14px;
   font-weight: 600;
   color: #f1f5f9;
+  margin-bottom: 2px;
 }
-
-.gerar-checkbox-sub {
+.toggle-info span {
   font-size: 12px;
   color: #64748b;
 }
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #334155;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle-slider:before {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  left: 3px; top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: #f59e0b; }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 
-.gerar-botoes {
-  display: grid;
-  grid-template-columns: 1fr auto;
+.aviso {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239,68,68,0.12);
+  border-left: 3px solid #ef4444;
+  border-radius: 0 8px 8px 0;
+  font-size: 12px;
+  color: #fca5a5;
+  display: none;
+}
+.aviso.visible { display: block; }
+
+.card-actions {
+  padding: 20px 24px;
+  display: flex;
   gap: 12px;
 }
 
 .btn-gerar {
-  padding: 16px;
+  flex: 1;
+  padding: 14px;
   background: linear-gradient(135deg, #10b981, #059669);
   color: #fff;
   border: none;
   border-radius: 10px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: opacity 0.2s, transform 0.1s;
+  transition: opacity 0.15s, transform 0.1s;
 }
-
-.btn-gerar:active {
-  opacity: 0.85;
-  transform: scale(0.98);
-}
+.btn-gerar:hover { opacity: 0.9; }
+.btn-gerar:active { transform: scale(0.98); }
 
 .btn-cancelar {
-  padding: 16px 20px;
-  background: #334155;
-  color: #94a3b8;
-  border: none;
+  padding: 14px 20px;
+  background: #0f172a;
+  color: #64748b;
+  border: 1.5px solid #334155;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   text-decoration: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: color 0.15s, border-color 0.15s;
 }
-
-.btn-cancelar:hover {
-  background: #475569;
-  color: #f1f5f9;
-}
+.btn-cancelar:hover { color: #f1f5f9; border-color: #475569; }
 
 @media (max-width: 480px) {
-  .gerar-card {
-    margin: 0;
-    border-radius: 12px;
-    padding: 20px 16px;
-  }
-  .gerar-botoes {
-    grid-template-columns: 1fr;
-  }
+  .card { border-radius: 10px; }
+  .card-actions { flex-direction: column-reverse; }
+  .btn-cancelar { text-align: center; }
 }
 </style>
 
-<div class="gerar-card">
-  <div class="gerar-titulo">➕ Gerar Nova Escala</div>
+<div class="page-header">
+  <h1>➕ Gerar Nova Escala</h1>
+</div>
 
-  <form method="POST">
+<div class="card">
+  <form method="POST" id="form-gerar">
     {% csrf_token %}
 
-    <div class="gerar-grid">
-      <div class="gerar-campo">
-        <label>Mês</label>
-        <select name="mes" required>
-          {% for m in "123456789012"|make_list %}
-          <option value="{{ forloop.counter }}" {% if forloop.counter == mes_atual %}selected{% endif %}>
-            {{ forloop.counter|stringformat:"02d" }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="gerar-campo">
-        <label>Ano</label>
-        <input type="number" name="ano" value="{{ ano_atual }}" min="2024" max="2030" required>
+    <!-- Período -->
+    <div class="card-section">
+      <div class="section-label">Período</div>
+      <div class="periodo-grid">
+        <div class="campo">
+          <label>Mês</label>
+          <select name="mes" required>
+            {% for m in "123456789012"|make_list %}
+            <option value="{{ forloop.counter }}" {% if forloop.counter == mes_atual %}selected{% endif %}>
+              {{ forloop.counter|stringformat:"02d" }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="campo">
+          <label>Ano</label>
+          <input type="number" name="ano" value="{{ ano_atual }}" min="2024" max="2030" required>
+        </div>
       </div>
     </div>
 
-    <label class="gerar-checkbox-label">
-      <input type="checkbox" name="force">
-      <div class="gerar-checkbox-texto">
-        <span class="gerar-checkbox-titulo">Forçar regerar</span>
-        <span class="gerar-checkbox-sub">Apaga a escala existente</span>
+    <!-- Opção forçar -->
+    <div class="card-section">
+      <div class="section-label">Opções</div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <strong>Forçar regerar</strong>
+          <span>Remove a escala existente deste mês antes de gerar</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" name="force" id="chk-force">
+          <span class="toggle-slider"></span>
+        </label>
       </div>
-    </label>
+      <div class="aviso" id="aviso-force">
+        ⚠️ A escala existente será permanentemente removida antes de gerar a nova.
+      </div>
+    </div>
 
-    <div class="gerar-botoes">
-      <button type="submit" class="btn-gerar">🚀 Gerar Escala</button>
+    <!-- Ações -->
+    <div class="card-actions">
+      <button type="submit" class="btn-gerar" id="btn-gerar">🚀 Gerar Escala</button>
       <a href="{% url 'escala:dashboard' %}" class="btn-cancelar">Cancelar</a>
     </div>
   </form>
 </div>
 
+<!-- Overlay de carregamento -->
+<div id="loading-overlay" style="display:none; position:fixed; inset:0; background:rgba(10,15,28,0.93); z-index:9999; flex-direction:column; align-items:center; justify-content:center; gap:20px;">
+  <div style="width:52px; height:52px; border:4px solid #1e293b; border-top-color:#10b981; border-radius:50%; animation:spin 0.85s linear infinite;"></div>
+  <div style="color:#f1f5f9; font-size:17px; font-weight:700;">Gerando escala...</div>
+  <div id="loading-msg" style="color:#64748b; font-size:13px; text-align:center; max-width:260px;"></div>
+  <div style="width:200px; height:5px; background:#1e293b; border-radius:99px; overflow:hidden;">
+    <div style="height:100%; background:linear-gradient(90deg,#10b981,#3b82f6); border-radius:99px; animation:progress 5s ease-in-out forwards;"></div>
+  </div>
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes progress { 0%{width:6%} 30%{width:45%} 60%{width:72%} 85%{width:88%} 100%{width:95%} }
+</style>
+
+<script>
+document.getElementById('chk-force').addEventListener('change', function() {
+  document.getElementById('aviso-force').classList.toggle('visible', this.checked);
+});
+
+const msgs = [
+  'Distribuindo domingos garantidos...',
+  'Gerando folgas por setor e turno...',
+  'Verificando dias consecutivos de trabalho...',
+  'Alocando folguistas nas coberturas...',
+  'Validando lotação mínima...',
+  'Ajustando quantidade de folgas por regime...',
+  'Finalizando e salvando escala...',
+];
+
+document.getElementById('form-gerar').addEventListener('submit', function() {
+  document.getElementById('loading-overlay').style.display = 'flex';
+  document.getElementById('btn-gerar').disabled = true;
+  let i = 0;
+  document.getElementById('loading-msg').textContent = msgs[0];
+  setInterval(function() {
+    i = Math.min(i + 1, msgs.length - 1);
+    document.getElementById('loading-msg').textContent = msgs[i];
+  }, 2800);
+});
+</script>
 {% endblock %}
