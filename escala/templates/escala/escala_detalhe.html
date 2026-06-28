@@ -105,8 +105,10 @@
 
 <div class="btn-group-mobile">
     <a href="{% url 'escala:exportar_escala_excel' escala.id %}" class="btn btn-success">📊 Exportar Excel</a>
-    <a href="{% url 'escala:revalidar_escala' escala.id %}" class="btn" style="background: #f59e0b;" 
+    <a href="{% url 'escala:revalidar_escala' escala.id %}" class="btn" style="background: #f59e0b;"
        onclick="return confirm('Deseja revalidar os alertas?');">🔄 Revalidar</a>
+    <a href="{% url 'escala:auto_corrigir_escala' escala.id %}" class="btn" style="background: #8b5cf6; color:white;"
+       onclick="return confirm('Tentar corrigir automaticamente os problemas de lotação?');">🔧 Auto-corrigir</a>
     <a href="{% url 'escala:escala_lista' %}" class="btn">← Voltar</a>
 </div>
 
@@ -214,19 +216,20 @@
                 <button class="btn-status" data-sit="FERIAS"      style="background:#b3e5fc;color:#01579b;">FB — Férias</button>
             </div>
 
-            <!-- Seção exclusiva para folguistas: escolha do turno coberto -->
+            <!-- Seção exclusiva para folguistas: escolha do setor/turno coberto -->
             <div id="secaoTurnoCoberto" style="display:none; margin-top:16px; border-top:1px solid #e5e7eb; padding-top:14px;">
-                <p style="margin:0 0 10px;color:#555;font-size:13px;">Turno coberto neste dia:</p>
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                    {% for turno in turnos_disponiveis %}
-                    <button class="btn-turno" data-turno-id="{{ turno.id }}"
+                <p style="margin:0 0 10px;color:#555;font-size:13px;">Setor/Turno coberto neste dia:</p>
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding-right:4px;">
+                    {% for st in setor_turnos_disponiveis %}
+                    <button class="btn-turno" data-turno-id="{{ st.turno.id }}" data-setor-id="{{ st.setor.id }}"
                         style="padding:10px 14px;border:2px solid #6366f1;border-radius:6px;background:#f0f0ff;color:#3730a3;font-weight:bold;cursor:pointer;text-align:left;font-size:13px;">
-                        {{ turno.nome }} <span style="font-weight:normal;color:#666;">{{ turno.horario_entrada|time:"H:i" }}–{{ turno.horario_saida|time:"H:i" }}</span>
+                        {{ st.setor.nome }} / {{ st.turno.nome }}
+                        <span style="font-weight:normal;color:#666;font-size:12px;">{{ st.turno.horario_entrada|time:"H:i" }}–{{ st.turno.horario_saida|time:"H:i" }}</span>
                     </button>
                     {% endfor %}
-                    <button class="btn-turno" data-turno-id=""
+                    <button class="btn-turno" data-turno-id="" data-setor-id=""
                         style="padding:10px 14px;border:2px solid #9ca3af;border-radius:6px;background:#f9fafb;color:#6b7280;font-weight:bold;cursor:pointer;text-align:left;font-size:13px;">
-                        Sem turno definido
+                        Sem cobertura definida
                     </button>
                 </div>
             </div>
@@ -308,15 +311,16 @@
             });
         });
 
-        // Botões de turno coberto (folguista)
+        // Botões de setor/turno coberto (folguista)
         document.querySelectorAll('.btn-turno').forEach(btn => {
             btn.addEventListener('click', function() {
                 const turnoId = this.dataset.turnoId;
+                const setorId = this.dataset.setorId;
                 fecharModal('modalEditar');
                 fetch('{% url "escala:alterar_turno_coberto" %}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-                    body: JSON.stringify({ escala_id: ESCALA_ID, funcionario_id: editarCtx.funcId, dia: editarCtx.dia, turno_id: turnoId })
+                    body: JSON.stringify({ escala_id: ESCALA_ID, funcionario_id: editarCtx.funcId, dia: editarCtx.dia, turno_id: turnoId, setor_id: setorId })
                 })
                 .then(r => r.json())
                 .then(data => {

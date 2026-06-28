@@ -19,6 +19,7 @@ urlpatterns = [
     path('alterar-dia/', views.alterar_situacao_dia, name='alterar_situacao_dia'),
     path('alterar-turno-coberto/', views.alterar_turno_coberto, name='alterar_turno_coberto'),
     path('escalas/<int:pk>/revalidar/', views.revalidar_escala, name='revalidar_escala'),
+    path('escalas/<int:pk>/auto-corrigir/', views.auto_corrigir_escala, name='auto_corrigir_escala'),
     path('escalas/<int:pk>/exportar-excel/', views.exportar_escala_excel, name='exportar_escala_excel'),
     
     # Funcionários

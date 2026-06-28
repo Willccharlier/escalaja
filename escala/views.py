@@ -278,6 +278,7 @@ def escala_detalhe(request, pk):
         'turnos_data': turnos_data,
         'folguistas_data': folguistas_data,
         'turnos_disponiveis': Turno.objects.all().order_by('horario_entrada'),
+        'setor_turnos_disponiveis': SetorTurno.objects.select_related('setor', 'turno').order_by('setor__nome', 'turno__horario_entrada'),
     }
     return render(request, 'escala/escala_detalhe.html', context)
 
@@ -388,8 +389,6 @@ def revalidar_escala(request, pk):
     if domingos:
         for func_id, dias_func in escala_gerada.items():
             funcionario = Funcionario.objects.get(id=func_id)
-            if funcionario.regime != '6x1':
-                continue  # domingo de folga só é exigido para 6x1
             tem_domingo = any(
                 dias_func.get(dom, 'TRABALHA') in ['FOLGA', 'FOLGA_COMPENSADA', 'FOLGA_ANIVERSARIO', 'FOLGA_FERIADO', 'FERIAS', 'ATESTADO']
                 for dom in domingos
@@ -440,7 +439,7 @@ def revalidar_escala(request, pk):
             )
             trabalhando = regulares + folguistas
 
-            if trabalhando < st.minimo_funcionarios:
+            if trabalhando < st.minimo_funcionarios and not st.permite_zero:
                 problemas_lotacao.append(
                     f"⚠️ DIA {dia:02d}/{escala.mes:02d} - "
                     f"{st.setor.nome}/{st.turno.nome}: {trabalhando}/{st.minimo_funcionarios}"
@@ -463,6 +462,271 @@ def revalidar_escala(request, pk):
     escala.save()
     
     messages.success(request, '🔄 Escala revalidada com sucesso!')
+    return redirect('escala:escala_detalhe', pk=escala.id)
+
+
+@login_required
+def auto_corrigir_escala(request, pk):
+    """Tenta corrigir automaticamente problemas de lotação mínima movendo folgas entre dias."""
+    from calendar import monthrange
+    from .models import SetorTurno
+    from django.db import transaction
+
+    escala = get_object_or_404(Escala, pk=pk)
+    dias_mes = monthrange(escala.ano, escala.mes)[1]
+    config = ConfiguracaoSistema.get()
+
+    # Carregar escala atual do banco em memória
+    dias_escala_qs = list(DiaEscala.objects.filter(escala=escala).select_related('funcionario', 'funcionario__grupo', 'funcionario__turno'))
+    escala_mem = {}  # {func_id: {dia: situacao}}
+    for d in dias_escala_qs:
+        escala_mem.setdefault(d.funcionario.id, {})[d.data.day] = d.situacao
+
+    # Mapear domingos do mês e o único domingo de folga de cada funcionário (R1 — intocável)
+    domingos_mes = {d for d in range(1, dias_mes + 1) if date(escala.ano, escala.mes, d).weekday() == 6}
+
+    def domingo_folga_de(func_id):
+        """Retorna o dia de domingo que este funcionário tem de folga (None se não tiver)."""
+        return next((d for d in domingos_mes if escala_mem.get(func_id, {}).get(d, 'TRABALHA') != 'TRABALHA'), None)
+
+    def tem_domingo_apos_troca(func_id, dia_removido, dia_adicionado):
+        """Verifica se o funcionário ainda terá domingo de folga após a troca."""
+        dom = domingo_folga_de(func_id)
+        if dom is None:
+            return False  # Já não tem domingo — não piorar
+        if dia_removido in domingos_mes and dia_removido == dom:
+            # Estamos removendo o único domingo de folga
+            # Só permitido se dia_adicionado também for domingo
+            return dia_adicionado in domingos_mes
+        return True
+
+    setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
+    regulares_por_st = {}
+    for st in setor_turnos:
+        regulares_por_st[(st.setor.id, st.turno.id)] = list(
+            Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno)
+        )
+
+    def trabalhando_no_dia(st, dia):
+        funcs = regulares_por_st.get((st.setor.id, st.turno.id), [])
+        return sum(1 for f in funcs if escala_mem.get(f.id, {}).get(dia, 'TRABALHA') == 'TRABALHA')
+
+    def tem_folgas_consecutivas(func_id):
+        dias = escala_mem.get(func_id, {})
+        for d in range(1, dias_mes):
+            if dias.get(d) == 'FOLGA' and dias.get(d + 1) == 'FOLGA':
+                return True
+        return False
+
+    def max_consecutivos_trabalho(func_id):
+        dias = escala_mem.get(func_id, {})
+        maximo = consecutivos = 0
+        for d in range(1, dias_mes + 1):
+            if dias.get(d, 'TRABALHA') == 'TRABALHA':
+                consecutivos += 1
+                maximo = max(maximo, consecutivos)
+            else:
+                consecutivos = 0
+        return maximo
+
+    limite_consec = {'5x2': 5, '6x1': 6}
+
+    correcoes = 0
+    relatorio = []
+
+    def tentar_mover_folga(func_id, dia_folga, dia_destino, st):
+        """Testa mover FOLGA de dia_folga para dia_destino. Aplica em escala_mem se válido. Retorna True se funcionou."""
+        func_regime = next((f.regime for funcs in regulares_por_st.values() for f in funcs if f.id == func_id), '6x1')
+        lim = limite_consec.get(func_regime, 6)
+
+        escala_mem[func_id][dia_folga] = 'TRABALHA'
+        escala_mem[func_id][dia_destino] = 'FOLGA'
+
+        valido = True
+        if tem_folgas_consecutivas(func_id):
+            valido = False
+        if max_consecutivos_trabalho(func_id) > lim:
+            valido = False
+        # Destino não pode criar déficit neste mesmo setor/turno
+        if valido and trabalhando_no_dia(st, dia_destino) < st.minimo_funcionarios and not st.permite_zero:
+            valido = False
+
+        if not valido:
+            escala_mem[func_id][dia_folga] = 'FOLGA'
+            escala_mem[func_id][dia_destino] = 'TRABALHA'
+
+        return valido
+
+    # Loop: revalida e corrige até não restar problemas ou estar genuinamente preso
+    problemas_anteriores = None
+    while True:
+        problemas = []
+        for dia in range(1, dias_mes + 1):
+            for st in setor_turnos:
+                if st.permite_zero or not regulares_por_st.get((st.setor.id, st.turno.id)):
+                    continue
+                if trabalhando_no_dia(st, dia) < st.minimo_funcionarios:
+                    problemas.append((dia, st))
+
+        if not problemas:
+            break  # Tudo resolvido
+
+        # Se os problemas são exatamente os mesmos da passagem anterior, estamos presos
+        chave_problemas = frozenset((d, st.setor.id, st.turno.id) for d, st in problemas)
+        if chave_problemas == problemas_anteriores:
+            break  # Sem progresso — para
+        problemas_anteriores = chave_problemas
+
+        for dia_prob, st in problemas:
+            if trabalhando_no_dia(st, dia_prob) >= st.minimo_funcionarios:
+                continue  # Já foi resolvido numa iteração anterior deste loop
+
+            funcs = regulares_por_st.get((st.setor.id, st.turno.id), [])
+            de_folga = [f for f in funcs
+                        if escala_mem.get(f.id, {}).get(dia_prob, 'TRABALHA') == 'FOLGA'
+                        and not (dia_prob in domingos_mes and dia_prob == domingo_folga_de(f.id))]
+
+            for func in de_folga:
+                func_id = func.id
+                # Deslizar a folga: +1, +2... até fim do mês, depois -1, -2...
+                candidatos = (
+                    list(range(dia_prob + 1, dias_mes + 1)) +
+                    list(range(dia_prob - 1, 0, -1))
+                )
+                for dia_destino in candidatos:
+                    if dia_destino in domingos_mes:
+                        continue
+                    if escala_mem.get(func_id, {}).get(dia_destino, 'TRABALHA') != 'TRABALHA':
+                        continue
+                    if tentar_mover_folga(func_id, dia_prob, dia_destino, st):
+                        # escala_mem já foi atualizado em tentar_mover_folga — salva no final
+                        relatorio.append(
+                            f"✅ {func.nome}: folga {dia_prob:02d}→{dia_destino:02d}/{escala.mes:02d} "
+                            f"({st.setor.nome}/{st.turno.nome})"
+                        )
+                        correcoes += 1
+                        break
+
+                if trabalhando_no_dia(st, dia_prob) >= st.minimo_funcionarios:
+                    break  # Este problema foi resolvido, próximo
+
+    # --- FASE 2: déficits que regulares não resolveram → tentar folguistas habilitados ---
+    # Carregar folguistas e coberturas atuais do banco
+    folguistas = list(
+        Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
+        .prefetch_related('grupos_habilitados', 'turnos_habilitados')
+    )
+    hab_setor = {f.id: set(f.grupos_habilitados.values_list('id', flat=True)) for f in folguistas}
+    hab_turno = {f.id: set(f.turnos_habilitados.values_list('id', flat=True)) for f in folguistas}
+
+    # Coberturas atuais dos folguistas (setor_coberto e turno_coberto por dia)
+    cobertura_folg = {}   # {func_id: {dia: (setor_id, turno_id)}}
+    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario', 'setor_coberto', 'turno_coberto'):
+        if d.setor_coberto and d.turno_coberto:
+            cobertura_folg.setdefault(d.funcionario.id, {})[d.data.day] = (d.setor_coberto.id, d.turno_coberto.id)
+
+    # Adicionar folguistas ao escala_mem
+    for d in DiaEscala.objects.filter(escala=escala, funcionario__tipo='FOLGUISTA').select_related('funcionario'):
+        fid = d.funcionario.id
+        escala_mem.setdefault(fid, {})[d.data.day] = d.situacao
+
+    mudancas_cobertura = {}  # {(func_id, dia): (setor_id, turno_id)} — novas coberturas a salvar
+
+    def folg_trabalhando_no_dia(st, dia):
+        return sum(
+            1 for fid, cobs in cobertura_folg.items()
+            if cobs.get(dia) == (st.setor.id, st.turno.id)
+            and escala_mem.get(fid, {}).get(dia) == 'TRABALHA'
+        )
+
+    for dia in range(1, dias_mes + 1):
+        for st in setor_turnos:
+            if st.permite_zero or not regulares_por_st.get((st.setor.id, st.turno.id)):
+                continue
+            reg = trabalhando_no_dia(st, dia)
+            folg = folg_trabalhando_no_dia(st, dia)
+            if reg + folg >= st.minimo_funcionarios:
+                continue  # OK
+
+            # Procurar folguista habilitado
+            for func in folguistas:
+                if st.setor.id not in hab_setor.get(func.id, set()):
+                    continue
+                if st.turno.id not in hab_turno.get(func.id, set()):
+                    continue
+
+                sit = escala_mem.get(func.id, {}).get(dia, 'TRABALHA')
+
+                if sit == 'TRABALHA':
+                    # Já trabalhando — só reatribuir cobertura
+                    cobertura_folg.setdefault(func.id, {})[dia] = (st.setor.id, st.turno.id)
+                    mudancas_cobertura[(func.id, dia)] = (st.setor.id, st.turno.id)
+                    relatorio.append(f"✅ {func.nome} → {st.setor.nome}/{st.turno.nome} dia {dia:02d}")
+                    correcoes += 1
+                    break
+
+                if sit == 'FOLGA':
+                    # Déficit sem permite_zero = folguista habilitado vai obrigatoriamente
+                    escala_mem[func.id][dia] = 'TRABALHA'
+                    cobertura_folg.setdefault(func.id, {})[dia] = (st.setor.id, st.turno.id)
+                    mudancas_cobertura[(func.id, dia)] = (st.setor.id, st.turno.id)
+                    relatorio.append(f"✅ {func.nome}: convocado dia {dia:02d} → {st.setor.nome}/{st.turno.nome}")
+                    correcoes += 1
+                    break
+
+    # Salvar todas as alterações em uma única transação
+    todos_func = {f.id: f for funcs in regulares_por_st.values() for f in funcs}
+    todos_func.update({f.id: f for f in folguistas})
+
+    with transaction.atomic():
+        for func_id, dias in escala_mem.items():
+            func = todos_func.get(func_id)
+            if not func:
+                continue
+            for dia, situacao in dias.items():
+                d = date(escala.ano, escala.mes, dia)
+                DiaEscala.objects.filter(escala=escala, funcionario=func, data=d).update(situacao=situacao)
+
+        # Salvar mudanças de cobertura dos folguistas
+        for (func_id, dia), (setor_id, turno_id) in mudancas_cobertura.items():
+            func = todos_func.get(func_id)
+            if not func:
+                continue
+            d = date(escala.ano, escala.mes, dia)
+            DiaEscala.objects.filter(escala=escala, funcionario=func, data=d).update(
+                setor_coberto_id=setor_id, turno_coberto_id=turno_id
+            )
+
+        # Revalidar e salvar observações
+        alertas = []
+        if correcoes > 0:
+            alertas.append(f"🔧 AUTO-CORREÇÃO: {correcoes} ajuste(s) realizado(s):")
+            alertas.extend([f"   {r}" for r in relatorio])
+        else:
+            alertas.append("ℹ️ AUTO-CORREÇÃO: Nenhum ajuste possível sem violar outras regras.")
+
+        restantes = []
+        for dia in range(1, dias_mes + 1):
+            for st in setor_turnos:
+                if st.permite_zero or not regulares_por_st.get((st.setor.id, st.turno.id)):
+                    continue
+                t = trabalhando_no_dia(st, dia) + folg_trabalhando_no_dia(st, dia)
+                if t < st.minimo_funcionarios:
+                    restantes.append(f"⚠️ DIA {dia:02d}/{escala.mes:02d} - {st.setor.nome}/{st.turno.nome}: {t}/{st.minimo_funcionarios}")
+
+        if restantes:
+            alertas.append("\n⚠️ Problemas restantes (não foi possível corrigir automaticamente):")
+            alertas.extend([f"   {r}" for r in restantes])
+            escala.gerada_com_sucesso = False
+        else:
+            alertas.append("\n✅ Lotação mínima OK em todos os dias!")
+            escala.gerada_com_sucesso = True
+
+        obs_anterior = escala.observacoes or ''
+        escala.observacoes = "\n".join(alertas) + "\n\n---\n" + obs_anterior
+        escala.save()
+
+    messages.success(request, f'🔧 Auto-correção concluída: {correcoes} ajuste(s).')
     return redirect('escala:escala_detalhe', pk=escala.id)
 
 
@@ -503,13 +767,14 @@ def alterar_situacao_dia(request):
 @login_required
 @require_POST
 def alterar_turno_coberto(request):
-    """Altera o turno coberto por um folguista em um dia específico"""
+    """Altera o setor+turno coberto por um folguista em um dia específico"""
     try:
         data = json.loads(request.body)
         escala_id = data['escala_id']
         funcionario_id = data['funcionario_id']
         dia = int(data['dia'])
         turno_id = data.get('turno_id') or None
+        setor_id = data.get('setor_id') or None
 
         escala = Escala.objects.get(id=escala_id)
         funcionario = Funcionario.objects.get(id=funcionario_id)
@@ -519,9 +784,11 @@ def alterar_turno_coberto(request):
 
         data_dia = date(escala.ano, escala.mes, dia)
         turno = Turno.objects.get(id=turno_id) if turno_id else None
+        setor = Grupo.objects.get(id=setor_id) if setor_id else None
 
         dia_escala = DiaEscala.objects.get(escala=escala, funcionario=funcionario, data=data_dia)
         dia_escala.turno_coberto = turno
+        dia_escala.setor_coberto = setor
         dia_escala.save()
 
         return JsonResponse({'sucesso': True})

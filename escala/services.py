@@ -112,6 +112,17 @@ class GeradorEscala:
                     else:
                         self.alertas.append("   ❌ Não foi possível corrigir lotação")
                 
+                # 7b. Cobrir déficits restantes com folguistas habilitados
+                problemas = self._validar_minimos_por_dia()
+                if problemas:
+                    self.alertas.append("\n🔧 ALOCANDO FOLGUISTAS NOS DÉFICITS RESTANTES...")
+                    corr_folg = self._cobrir_deficits_com_folguistas()
+                    if corr_folg > 0:
+                        self.alertas.append(f"   ✅ {corr_folg} déficit(s) coberto(s) por folguistas!")
+                        problemas = self._validar_minimos_por_dia()
+                    else:
+                        self.alertas.append("   ⚠️ Sem folguistas habilitados disponíveis para os déficits")
+
                 # 8. Corrigir folgas consecutivas (se config ativa)
                 if self.config.consecutivas_ativo:
                     self.alertas.append(f"\n🔧 CORRIGINDO FOLGAS CONSECUTIVAS ({self.config.consecutivas_regime})...")
@@ -124,8 +135,6 @@ class GeradorEscala:
                     self.alertas.append("\n⏭️ Regra de folgas consecutivas desativada")
                 
                 # 9. Re-verificar consecutivos de trabalho após todas as redistribuições
-                # (domingo, redistribuição de lotação e remoção de folgas extras podem ter
-                # criado novas sequências acima do limite CLT)
                 self.alertas.append("\n🔧 RE-VERIFICANDO CONSECUTIVOS DE TRABALHO (pós-redistribuição)...")
                 corr_final = self._corrigir_maximos_consecutivos()
                 if corr_final > 0:
@@ -133,25 +142,51 @@ class GeradorEscala:
                 else:
                     self.alertas.append("   ✅ Consecutivos OK!")
 
-                # 10. Validações finais e alertas
+                # 9b. Reparo determinístico R1: corrigir quem ficou sem domingo após todos os ajustes
+                self.alertas.append("\n🔧 REPARANDO R1 (domingo garantido pós-geração)...")
+                corr_r1 = self._corrigir_r1_pos_geracao()
+                if corr_r1 > 0:
+                    self.alertas.append(f"   ✅ {corr_r1} domingos reparados!")
+                else:
+                    self.alertas.append("   ✅ R1 OK — todos têm domingo!")
+
+                # 9c. Corrigir quantidade de folgas no mês (R2 CLT)
+                self.alertas.append("\n🔧 VERIFICANDO QUANTIDADE DE FOLGAS NO MÊS...")
+                prob_folgas = self._validar_folgas_mes()
+                if prob_folgas:
+                    self.alertas.append("   ⚠️ Ajustando folgas mensais...")
+                    self._corrigir_folgas_mes()
+                    prob_folgas = self._validar_folgas_mes()
+                if not prob_folgas:
+                    self.alertas.append("   ✅ Folgas mensais OK!")
+
+                # 10. Validações finais
                 self._validar_e_alertar_consecutividade()
-                self._validar_e_alertar_domingo_folga()
+                problemas_domingo = self._validar_e_alertar_domingo_folga()
+                problemas_lotacao = self._validar_minimos_por_dia()
+                prob_folgas_final = self._validar_folgas_mes()
 
                 # 11. Salvar no banco
                 self._salvar_dias_escala(escala)
-                
-                # 11. Definir status final
-                # Mínimo por turno é regra absoluta. Folguistas cobrindo um turno já foram
-                # contados em _validar_minimos_por_dia, então "problemas" só existe se
-                # nenhum regular nem folguista cobre o turno no dia — escala genuinamente inválida.
-                if problemas:
+
+                # 12. Status final — as 3 regras são leis absolutas, sem exceção
+                erros = []
+                if problemas_domingo:
+                    erros.append(("\n❌ R1 VIOLADA — funcionários sem domingo de folga:", problemas_domingo))
+                if prob_folgas_final:
+                    erros.append(("\n❌ FOLGAS MENSAIS INCORRETAS:", prob_folgas_final))
+                if problemas_lotacao:
+                    erros.append(("\n❌ LOTAÇÃO MÍNIMA NÃO ATENDIDA:", problemas_lotacao))
+
+                if erros:
                     escala.gerada_com_sucesso = False
-                    self.alertas.append("\n❌ Escala com déficit de pessoal — turnos abaixo do mínimo:")
-                    self.alertas.extend([f"   ⚠️ {p}" for p in problemas])
-                    self.alertas.append("   Cadastre mais funcionários ou folguistas habilitados para esses turnos.")
+                    for titulo, itens in erros:
+                        self.alertas.append(titulo)
+                        self.alertas.extend([f"   ❌ {i}" for i in itens])
+                    self.alertas.append("\n⛔ Escala inválida — as regras obrigatórias não foram atendidas.")
                 else:
                     escala.gerada_com_sucesso = True
-                    self.alertas.append("\n✅ Escala gerada com sucesso!")
+                    self.alertas.append("\n✅ Escala gerada com sucesso! Todas as regras atendidas.")
                 
                 escala.observacoes = "\n".join(self.alertas)
                 escala.save()
@@ -1256,6 +1291,166 @@ class GeradorEscala:
 
         return trocas_realizadas
     
+    def _folgas_esperadas_mes(self, func):
+        """Retorna o total de folgas que o funcionário deve ter no mês."""
+        semanas = self._dividir_em_semanas_correto()
+        return sum(self._folgas_semana(func, len(sem)) for sem in semanas)
+
+    def _validar_folgas_mes(self):
+        """Retorna lista de funcionários com quantidade errada de folgas no mês."""
+        problemas = []
+        funcionarios = Funcionario.objects.filter(
+            id__in=list(self.escala_gerada.keys()), tipo='REGULAR', ativo=True
+        )
+        for func in funcionarios:
+            esperadas = self._folgas_esperadas_mes(func)
+            reais = sum(1 for s in self.escala_gerada[func.id].values() if s != 'TRABALHA')
+            if reais != esperadas:
+                problemas.append(f"{func.nome} ({func.regime}): {reais} folgas, esperado {esperadas}")
+        return problemas
+
+    def _corrigir_folgas_mes(self):
+        """Ajusta a quantidade de folgas de cada funcionário para o total correto do mês."""
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
+        domingos = {d for d in range(1, self.dias_mes + 1) if date(self.ano, self.mes, d).weekday() == 6}
+        funcionarios = {
+            f.id: f for f in Funcionario.objects.filter(
+                id__in=list(self.escala_gerada.keys()), tipo='REGULAR', ativo=True
+            ).select_related('grupo', 'turno')
+        }
+
+        def cobertura(func_id, dia):
+            func = funcionarios.get(func_id)
+            if not func:
+                return 99
+            return sum(
+                1 for fid, esc in self.escala_gerada.items()
+                if fid != func_id and esc.get(dia) == 'TRABALHA'
+                and funcionarios.get(fid) and funcionarios[fid].grupo_id == func.grupo_id
+                and funcionarios[fid].turno_id == func.turno_id
+            )
+
+        def minimo_st(func_id):
+            func = funcionarios.get(func_id)
+            if not func:
+                return 1
+            st = next((s for s in setor_turnos if s.setor.id == func.grupo_id and s.turno.id == func.turno_id), None)
+            return st.minimo_funcionarios if st else 1
+
+        for func_id, escala in self.escala_gerada.items():
+            func = funcionarios.get(func_id)
+            if not func:
+                continue
+            esperadas = self._folgas_esperadas_mes(func)
+            reais = sum(1 for s in escala.values() if s != 'TRABALHA')
+            dom_sagrado = self.domingo_garantido.get(func_id)
+
+            if reais > esperadas:
+                # Remover folgas excedentes — começar pelos dias com mais cobertura (menos impacto)
+                folgas = sorted(
+                    [d for d, s in escala.items() if s != 'TRABALHA' and d != dom_sagrado],
+                    key=lambda d: -cobertura(func_id, d)
+                )
+                for d in folgas:
+                    if reais <= esperadas:
+                        break
+                    self.escala_gerada[func_id][d] = 'TRABALHA'
+                    reais -= 1
+
+            elif reais < esperadas:
+                # Adicionar folgas — escolher dias de trabalho com mais cobertura
+                trabalha = sorted(
+                    [d for d, s in escala.items() if s == 'TRABALHA' and d not in domingos],
+                    key=lambda d: -cobertura(func_id, d)
+                )
+                for d in trabalha:
+                    if reais >= esperadas:
+                        break
+                    cob = cobertura(func_id, d)
+                    if cob >= minimo_st(func_id):
+                        self.escala_gerada[func_id][d] = 'FOLGA'
+                        reais += 1
+
+    def _cobrir_deficits_com_folguistas(self):
+        """
+        Para cada déficit de lotação restante, tenta realocar um folguista habilitado:
+        - Se o folguista está de FOLGA naquele dia → move a folga para outro dia válido
+        - Se o folguista está TRABALHANDO mas cobrindo outro setor → reatribui para o déficit
+        Só age se o folguista for habilitado para o setor E turno do déficit.
+        """
+        setor_turnos = list(SetorTurno.objects.select_related('setor', 'turno').all())
+        folguistas = list(
+            Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
+            .prefetch_related('grupos_habilitados', 'turnos_habilitados')
+        )
+        if not folguistas:
+            return 0
+
+        hab_setor = {f.id: set(f.grupos_habilitados.values_list('id', flat=True)) for f in folguistas}
+        hab_turno = {f.id: set(f.turnos_habilitados.values_list('id', flat=True)) for f in folguistas}
+        domingos = {d for d in range(1, self.dias_mes + 1) if date(self.ano, self.mes, d).weekday() == 6}
+        correcoes = 0
+
+        for dia in range(1, self.dias_mes + 1):
+            for st in setor_turnos:
+                if st.permite_zero:
+                    continue
+                regulares_st = [
+                    f for f in Funcionario.objects.filter(tipo='REGULAR', ativo=True, grupo=st.setor, turno=st.turno)
+                ]
+                if not regulares_st:
+                    continue
+
+                reg_trabalhando = sum(
+                    1 for f in regulares_st
+                    if self.escala_gerada.get(f.id, {}).get(dia) == 'TRABALHA'
+                )
+                folg_cobrindo = sum(
+                    1 for fid in self.setor_coberto
+                    if self.setor_coberto[fid].get(dia) == st.setor.id
+                    and self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
+                    and self.escala_gerada.get(fid, {}).get(dia) == 'TRABALHA'
+                )
+                if reg_trabalhando + folg_cobrindo >= st.minimo_funcionarios:
+                    continue  # Sem déficit aqui
+
+                # Procurar folguista habilitado
+                for folg in folguistas:
+                    if st.setor.id not in hab_setor.get(folg.id, set()):
+                        continue
+                    if st.turno.id not in hab_turno.get(folg.id, set()):
+                        continue
+
+                    sit_dia = self.escala_gerada.get(folg.id, {}).get(dia, 'TRABALHA')
+
+                    if sit_dia == 'TRABALHA':
+                        # Folguista já trabalhando — só reatribuir cobertura
+                        self.setor_coberto.setdefault(folg.id, {})[dia] = st.setor.id
+                        self.turno_coberto.setdefault(folg.id, {})[dia] = st.turno.id
+                        correcoes += 1
+                        break
+
+                    if sit_dia == 'FOLGA':
+                        # Déficit sem permite_zero = folguista habilitado vai obrigatoriamente
+                        self.escala_gerada[folg.id][dia] = 'TRABALHA'
+                        self.setor_coberto.setdefault(folg.id, {})[dia] = st.setor.id
+                        self.turno_coberto.setdefault(folg.id, {})[dia] = st.turno.id
+                        correcoes += 1
+                        break
+
+                # Re-checar se déficit foi resolvido
+                reg_t = sum(1 for f in regulares_st if self.escala_gerada.get(f.id, {}).get(dia) == 'TRABALHA')
+                folg_t = sum(
+                    1 for fid in self.setor_coberto
+                    if self.setor_coberto[fid].get(dia) == st.setor.id
+                    and self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
+                    and self.escala_gerada.get(fid, {}).get(dia) == 'TRABALHA'
+                )
+                if reg_t + folg_t >= st.minimo_funcionarios:
+                    continue  # Resolvido
+
+        return correcoes
+
     def _validar_minimos_por_dia(self):
         """Valida se todos os dias têm lotação mínima por setor×turno.
         Conta regulares (grupo+turno) + folguistas (setor_coberto+turno_coberto)."""
@@ -1514,32 +1709,121 @@ class GeradorEscala:
             self.alertas.append("\n⚠️ Folgas consecutivas restantes:")
             self.alertas.extend([f"   {p}" for p in problemas])
     
+    def _corrigir_r1_pos_geracao(self):
+        """
+        Reparo determinístico R1: para cada funcionário sem domingo de folga,
+        tenta trocar um dos seus dias de FOLGA pelo domingo mais coberto do mês.
+        Se nenhuma troca valida CLT + lotação, força o domingo mesmo assim (R1 é lei).
+        """
+        domingos = [d for d in range(1, self.dias_mes + 1)
+                    if date(self.ano, self.mes, d).weekday() == 6]
+        if not domingos:
+            return 0
+
+        funcionarios_map = {
+            f.id: f for f in Funcionario.objects.filter(
+                ativo=True
+            ).select_related('grupo', 'turno')
+        }
+        correcoes = 0
+
+        for func_id, escala in self.escala_gerada.items():
+            # Já tem domingo?
+            if any(escala.get(d, 'TRABALHA') != 'TRABALHA' for d in domingos):
+                continue
+
+            func = funcionarios_map.get(func_id)
+            if not func:
+                continue
+
+            # Colegas do mesmo setor/turno (para medir cobertura)
+            colegas = [
+                fid for fid, f in funcionarios_map.items()
+                if fid != func_id
+                and f.grupo_id == func.grupo_id
+                and f.turno_id == func.turno_id
+            ]
+
+            def cobertura(dia):
+                return sum(1 for fid in colegas
+                           if self.escala_gerada.get(fid, {}).get(dia) == 'TRABALHA')
+
+            # Dias de folga não-domingo disponíveis para trocar
+            dias_folga = [d for d in range(1, self.dias_mes + 1)
+                          if escala.get(d) == 'FOLGA' and d not in domingos]
+
+            # Domingos ordenados por maior cobertura (mais seguros para receber folga)
+            domingos_ord = sorted(domingos, key=cobertura, reverse=True)
+
+            reparado = False
+            for dom in domingos_ord:
+                # Ordenar folgas a remover: escolher dia com mais cobertura (menos impacto)
+                folgas_ord = sorted(dias_folga, key=cobertura, reverse=True)
+
+                for dia_trocar in folgas_ord:
+                    self.escala_gerada[func_id][dia_trocar] = 'TRABALHA'
+                    self.escala_gerada[func_id][dom] = 'FOLGA'
+
+                    valido = (
+                        self._validar_consecutividade_funcionario(func_id) and
+                        self._validar_lotacao_dias_especificos([dia_trocar, dom])
+                    )
+
+                    if valido:
+                        self.domingo_garantido[func_id] = dom
+                        dias_folga.remove(dia_trocar)
+                        correcoes += 1
+                        reparado = True
+                        break
+                    else:
+                        # Desfaz
+                        self.escala_gerada[func_id][dia_trocar] = 'FOLGA'
+                        self.escala_gerada[func_id][dom] = 'TRABALHA'
+
+                if reparado:
+                    break
+
+            # Se nenhuma troca válida — forçar o domingo de maior cobertura (R1 é lei)
+            if not reparado and domingos_ord:
+                dom_forcado = domingos_ord[0]
+                # Trocar o dia de folga com menor impacto (mais coberto)
+                if dias_folga:
+                    dia_trocar = max(dias_folga, key=cobertura)
+                    self.escala_gerada[func_id][dia_trocar] = 'TRABALHA'
+                self.escala_gerada[func_id][dom_forcado] = 'FOLGA'
+                self.domingo_garantido[func_id] = dom_forcado
+                correcoes += 1
+                self.alertas.append(
+                    f"   ⚠️ R1 forçado para {func.nome} — domingo {dom_forcado:02d}/{self.mes:02d} "
+                    f"(verifique cobertura desse dia)"
+                )
+
+        return correcoes
+
     def _validar_e_alertar_domingo_folga(self):
-        """Alerta sobre funcionários sem domingo"""
+        """Valida R1: todo funcionário deve ter pelo menos 1 domingo de folga. Retorna lista de violações."""
         domingos = [
             dia for dia in range(1, self.dias_mes + 1)
             if date(self.ano, self.mes, dia).weekday() == 6
         ]
-        
+
         if not domingos:
-            return
-        
+            return []
+
         problemas = []
-        
+
         for func_id in self.escala_gerada.keys():
             funcionario = Funcionario.objects.get(id=func_id)
-            
+
             tem_domingo = any(
-                self.escala_gerada[func_id][dom] != 'TRABALHA'
+                self.escala_gerada[func_id].get(dom, 'TRABALHA') != 'TRABALHA'
                 for dom in domingos
             )
-            
+
             if not tem_domingo:
-                problemas.append(f"⚠️ {funcionario.nome}")
-        
-        if problemas:
-            self.alertas.append("\n⚠️ Sem domingo de folga:")
-            self.alertas.extend([f"   {p}" for p in problemas])
+                problemas.append(f"{funcionario.nome} ({funcionario.regime})")
+
+        return problemas
     
     def _salvar_dias_escala(self, escala):
         """Salva escala no banco"""
