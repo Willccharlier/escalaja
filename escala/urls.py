@@ -53,5 +53,8 @@ urlpatterns = [
     # Configurações
     path('configuracoes/', views.configuracao_view, name='configuracao'),
 
-
+    # Portal do funcionário
+    path('funcionario/', views.portal_funcionario, name='portal_funcionario'),
+    path('funcionario/minha-escala/', views.minha_escala, name='minha_escala'),
+    path('funcionarios/<int:pk>/qrcode/', views.gerar_qrcode_funcionario, name='qrcode_funcionario'),
 ]

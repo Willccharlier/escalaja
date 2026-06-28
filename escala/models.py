@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
+from django.contrib.auth.models import User
 from datetime import date
 
 
@@ -253,3 +254,37 @@ class ConfiguracaoSistema(models.Model):
         return 'Configurações do Sistema'
 
 
+# =========================
+# PERFIL DO FUNCIONÁRIO
+# =========================
+class PerfilFuncionario(models.Model):
+    user        = models.OneToOneField(User, on_delete=models.CASCADE, related_name='perfil_funcionario')
+    funcionario = models.OneToOneField(Funcionario, on_delete=models.CASCADE, related_name='perfil')
+
+    # Dados do cadastro
+    ip_cadastro         = models.GenericIPAddressField(null=True, blank=True)
+    user_agent_cadastro = models.TextField(blank=True)
+    data_cadastro       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Perfil de Funcionário'
+
+    def __str__(self):
+        return f'Perfil — {self.funcionario.nome}'
+
+
+# =========================
+# TOKEN DE CONVITE
+# =========================
+class TokenCadastroFuncionario(models.Model):
+    """Token gerado pelo gestor para liberar auto-cadastro de um funcionário."""
+    funcionario = models.OneToOneField(
+        Funcionario, on_delete=models.CASCADE,
+        related_name='token_cadastro'
+    )
+    token       = models.CharField(max_length=64, unique=True)
+    criado_em   = models.DateTimeField(auto_now_add=True)
+    usado       = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f'Token {self.funcionario.nome}'

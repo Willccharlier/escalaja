@@ -206,7 +206,10 @@
             <a href="{% url 'escala:funcionario_editar' func.pk %}" class="btn-small btn-edit">
                 ✏️ Editar
             </a>
-            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}" 
+            <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
+                📱 QR Code
+            </a>
+            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}"
                   style="display: inline;"
                   onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
                 {% csrf_token %}
@@ -267,7 +270,10 @@
             <a href="{% url 'escala:funcionario_editar' func.pk %}" class="btn-small btn-edit">
                 ✏️ Editar
             </a>
-            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}" 
+            <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
+                📱 QR Code
+            </a>
+            <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}"
                   style="display: inline;"
                   onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
                 {% csrf_token %}

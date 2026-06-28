@@ -259,6 +259,76 @@
 </div>
 </form>
 
+<!-- QR Code de acesso do funcionário -->
+<div class="cfg-card no-print" style="margin-top:24px;">
+  <div class="cfg-card-header" style="color:#10b981;">
+    📱 QR Code — Acesso do Funcionário
+  </div>
+  <div class="cfg-card-body" style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;">
+    <div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 0 0 3px #334155;flex-shrink:0;">
+      <img src="data:image/png;base64,{{ qr_b64 }}" style="width:160px;height:160px;display:block;">
+    </div>
+    <div style="flex:1;min-width:200px;">
+      <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">
+        Mostre ou imprima este QR Code para seus funcionários
+      </div>
+      <div style="font-size:12px;color:#64748b;line-height:1.6;margin-bottom:14px;">
+        O funcionário escaneia com a câmera do celular, digita o nome,
+        confirma quem é e cria uma senha.
+      </div>
+      <button onclick="window.print()" style="padding:10px 18px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+        🖨️ Imprimir QR Code
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Folha de impressão limpa -->
+<div class="print-only" style="display:none;">
+  <div style="
+    width:100%;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    font-family:'Segoe UI',sans-serif;
+    text-align:center;
+    padding:40px;
+    box-sizing:border-box;
+  ">
+    <div style="font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:6px;">EscalaJa</div>
+    <div style="font-size:14px;color:#666;margin-bottom:36px;letter-spacing:0.02em;">Sistema de Gestão de Escalas</div>
+
+    <div style="border:3px solid #000;border-radius:12px;padding:16px;display:inline-block;margin-bottom:32px;">
+      <img src="data:image/png;base64,{{ qr_b64 }}" style="width:260px;height:260px;display:block;">
+    </div>
+
+    <div style="font-size:20px;font-weight:700;margin-bottom:10px;">Escaneie para acessar sua escala</div>
+    <div style="font-size:14px;color:#444;max-width:340px;line-height:1.6;margin-bottom:20px;">
+      Aponte a câmera do celular para o QR Code e crie seu acesso em segundos.
+    </div>
+
+    <div style="border-top:1px solid #ccc;padding-top:18px;width:340px;">
+      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Ou acesse pelo navegador</div>
+      <div style="font-size:14px;font-weight:700;color:#000;letter-spacing:0.02em;">{{ url_cadastro }}</div>
+    </div>
+  </div>
+</div>
+
+<style>
+@media print {
+  * { visibility: hidden; }
+  .print-only, .print-only * { visibility: visible !important; }
+  .print-only {
+    display: flex !important;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+}
+</style>
+
 <script>
 function toggleRegime() {
   const ativo = document.getElementById('consecutivas_ativo').checked;

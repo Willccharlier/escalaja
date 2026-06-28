@@ -1,4 +1,7 @@
+import base64
+import io
 import json
+import secrets
 from calendar import monthrange
 from datetime import datetime, date, time, timedelta
 
@@ -9,14 +12,23 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 # Bibliotecas de terceiros
+import qrcode
+import qrcode.image.svg
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # Imports locais
-from .models import Escala, DiaEscala, Funcionario, Turno, Feriado, ConfiguracaoSistema, Grupo, SetorTurno
+from django.contrib.auth.models import User
+
+from .models import (
+    Escala, DiaEscala, Funcionario, Turno, Feriado,
+    ConfiguracaoSistema, Grupo, SetorTurno,
+    PerfilFuncionario, TokenCadastroFuncionario,
+)
 from .services import GeradorEscala
 
 
@@ -1586,7 +1598,21 @@ def configuracao_view(request):
         config.save()
         messages.success(request, '✅ Configurações salvas!')
         return redirect('escala:configuracao')
-    return render(request, 'escala/configuracao.html', {'config': config})
+    # Gera QR Code da página de cadastro do funcionário
+    host = request.get_host()
+    scheme = request.META.get('HTTP_X_FORWARDED_PROTO', 'https')
+    url_cadastro = f"{scheme}://{host}/funcionario/"
+    img = qrcode.make(url_cadastro, box_size=8, border=4)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    qr_b64 = base64.b64encode(buf.read()).decode()
+
+    return render(request, 'escala/configuracao.html', {
+        'config': config,
+        'qr_b64': qr_b64,
+        'url_cadastro': url_cadastro,
+    })
 
 
 # ==================== GRUPOS ====================
@@ -1901,5 +1927,369 @@ def calendario_view(request):
         'meses': meses,
         'anos': range(2024, 2031),
     }
+    return render(request, 'escala/calendario.html', context)
+
+
+# ─────────────────────────────────────────────
+#  AUTO-CADASTRO DO FUNCIONÁRIO
+# ─────────────────────────────────────────────
+
+def _get_client_ip(request):
+    x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded:
+        return x_forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
+@csrf_exempt
+def portal_funcionario(request):
+    """Página única do QR Code: login ou cadastro conforme o estado."""
+    if request.user.is_authenticated and hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:minha_escala')
+
+    modo = request.POST.get('modo', request.GET.get('modo', 'login'))
+    erro = None
+    candidatos = []
+    nome_buscado = ''
+    func_id = None
+
+    if request.method == 'POST':
+        action = request.POST.get('action', '')
+
+        # ── LOGIN ──
+        if action == 'login':
+            nome  = request.POST.get('nome', '').strip()
+            senha = request.POST.get('senha', '')
+            perfil = None
+            try:
+                perfil = PerfilFuncionario.objects.select_related('user').get(
+                    funcionario__nome__iexact=nome)
+            except PerfilFuncionario.DoesNotExist:
+                perfis = PerfilFuncionario.objects.select_related('user').filter(
+                    funcionario__nome__icontains=nome)
+                if perfis.count() == 1:
+                    perfil = perfis.first()
+            if perfil:
+                user = authenticate(request, username=perfil.user.username, password=senha)
+                if user:
+                    from django.contrib.auth import login as auth_login
+                    auth_login(request, user)
+                    return redirect('escala:minha_escala')
+                erro = 'Senha incorreta.'
+            else:
+                erro = 'Nome não encontrado. Verifique se já fez o cadastro.'
+            modo = 'login'
+
+        # ── BUSCA PARA CADASTRO ──
+        elif action == 'buscar':
+            nome_buscado = request.POST.get('nome', '').strip()
+            if nome_buscado:
+                candidatos = list(Funcionario.objects.filter(
+                    ativo=True, nome__icontains=nome_buscado
+                ).exclude(perfil__isnull=False)[:10])
+                if not candidatos:
+                    erro = 'Nenhum funcionário encontrado, ou acesso já cadastrado.'
+            modo = 'cadastro'
+
+        # ── CONFIRMAR CADASTRO ──
+        elif action == 'confirmar':
+            func_id = request.POST.get('func_id')
+            senha   = request.POST.get('senha', '')
+            senha2  = request.POST.get('senha2', '')
+            try:
+                func = Funcionario.objects.get(pk=func_id, ativo=True)
+            except Funcionario.DoesNotExist:
+                erro = 'Funcionário inválido.'
+                modo = 'cadastro'
+                return render(request, 'escala/portal_funcionario.html', locals())
+
+            if PerfilFuncionario.objects.filter(funcionario=func).exists():
+                erro = 'Este funcionário já possui acesso. Faça login.'
+                modo = 'login'
+            elif len(senha) < 6:
+                erro = 'Senha deve ter pelo menos 6 caracteres.'
+                candidatos = [func]; nome_buscado = func.nome; modo = 'cadastro'
+            elif senha != senha2:
+                erro = 'As senhas não coincidem.'
+                candidatos = [func]; nome_buscado = func.nome; modo = 'cadastro'
+            else:
+                username = f'func_{func.id}'
+                User.objects.filter(username=username).delete()
+                user = User.objects.create_user(
+                    username=username, password=senha,
+                    first_name=func.nome.split()[0],
+                    last_name=' '.join(func.nome.split()[1:]),
+                )
+                PerfilFuncionario.objects.create(
+                    user=user, funcionario=func,
+                    ip_cadastro=_get_client_ip(request),
+                    user_agent_cadastro=request.META.get('HTTP_USER_AGENT', ''),
+                )
+                from django.contrib.auth import login as auth_login
+                auth_login(request, user)
+                messages.success(request, f'Bem-vindo(a), {func.nome.split()[0]}!')
+                return redirect('escala:minha_escala')
+
+    return render(request, 'escala/portal_funcionario.html', {
+        'modo': modo, 'erro': erro,
+        'candidatos': candidatos, 'nome_buscado': nome_buscado, 'func_id': func_id,
+    })
+
+
+@csrf_exempt
+def login_funcionario(request):
+    """Login do funcionário pelo nome + senha (sem precisar saber o username interno)."""
+    if request.user.is_authenticated and hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:minha_escala')
+
+    erro = None
+    if request.method == 'POST':
+        nome  = request.POST.get('nome', '').strip()
+        senha = request.POST.get('senha', '')
+
+        # Busca PerfilFuncionario pelo nome do funcionário
+        try:
+            from django.db.models import Q
+            perfil = PerfilFuncionario.objects.select_related('user', 'funcionario').get(
+                funcionario__nome__iexact=nome
+            )
+        except PerfilFuncionario.DoesNotExist:
+            # Tenta busca parcial (ex: só o primeiro nome)
+            perfis = PerfilFuncionario.objects.select_related('user', 'funcionario').filter(
+                funcionario__nome__icontains=nome
+            )
+            if perfis.count() == 1:
+                perfil = perfis.first()
+            else:
+                perfil = None
+
+        if perfil:
+            user = authenticate(request, username=perfil.user.username, password=senha)
+            if user:
+                from django.contrib.auth import login as auth_login
+                auth_login(request, user)
+                return redirect('escala:minha_escala')
+            else:
+                erro = 'Senha incorreta.'
+        else:
+            erro = 'Nome não encontrado. Verifique se já fez o cadastro de acesso.'
+
+    return render(request, 'escala/login_funcionario.html', {'erro': erro})
+
+
+@csrf_exempt
+def cadastro_funcionario(request):
+    """Passo 1: funcionário digita o nome → sistema busca correspondências."""
+    # Se já tem perfil, vai direto para minha-escala
+    if request.user.is_authenticated and hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:minha_escala')
+
+    erro = None
+    candidatos = []
+    nome_buscado = ''
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+
+        # Passo 2: confirmação + senha
+        if action == 'confirmar':
+            func_id = request.POST.get('func_id')
+            senha   = request.POST.get('senha', '')
+            senha2  = request.POST.get('senha2', '')
+
+            try:
+                func = Funcionario.objects.get(pk=func_id, ativo=True)
+            except Funcionario.DoesNotExist:
+                erro = 'Funcionário inválido.'
+                return render(request, 'escala/cadastro_funcionario.html', {'erro': erro})
+
+            # Já cadastrado?
+            if PerfilFuncionario.objects.filter(funcionario=func).exists():
+                erro = 'Este funcionário já possui acesso cadastrado. Fale com o gestor.'
+                return render(request, 'escala/cadastro_funcionario.html', {'erro': erro})
+
+            if len(senha) < 6:
+                erro = 'A senha deve ter pelo menos 6 caracteres.'
+                candidatos = [func]
+                nome_buscado = func.nome
+                return render(request, 'escala/cadastro_funcionario.html', {
+                    'erro': erro, 'candidatos': candidatos,
+                    'nome_buscado': nome_buscado, 'passo': 2, 'func_id': func_id,
+                })
+            if senha != senha2:
+                erro = 'As senhas não coincidem.'
+                candidatos = [func]
+                nome_buscado = func.nome
+                return render(request, 'escala/cadastro_funcionario.html', {
+                    'erro': erro, 'candidatos': candidatos,
+                    'nome_buscado': nome_buscado, 'passo': 2, 'func_id': func_id,
+                })
+
+            # Criar User + Perfil
+            username = f'func_{func.id}'
+            if User.objects.filter(username=username).exists():
+                User.objects.filter(username=username).delete()
+
+            user = User.objects.create_user(
+                username=username,
+                password=senha,
+                first_name=func.nome.split()[0],
+                last_name=' '.join(func.nome.split()[1:]),
+            )
+            PerfilFuncionario.objects.create(
+                user=user,
+                funcionario=func,
+                ip_cadastro=_get_client_ip(request),
+                user_agent_cadastro=request.META.get('HTTP_USER_AGENT', ''),
+            )
+
+            from django.contrib.auth import login as auth_login
+            auth_login(request, user)
+            messages.success(request, f'Bem-vindo(a), {func.nome.split()[0]}! Acesso criado com sucesso.')
+            return redirect('escala:minha_escala')
+
+        # Passo 1: busca por nome
+        nome_buscado = request.POST.get('nome', '').strip()
+        if nome_buscado:
+            from django.db.models import Q
+            candidatos = list(
+                Funcionario.objects.filter(
+                    ativo=True,
+                    nome__icontains=nome_buscado
+                ).exclude(
+                    perfil__isnull=False  # exclui quem já tem perfil
+                )[:10]
+            )
+            if not candidatos:
+                erro = 'Nenhum funcionário ativo encontrado com esse nome, ou já possui acesso cadastrado.'
+
+    return render(request, 'escala/cadastro_funcionario.html', {
+        'candidatos': candidatos,
+        'nome_buscado': nome_buscado,
+        'erro': erro,
+        'passo': 2 if candidatos and request.method == 'POST' else 1,
+    })
+
+
+@login_required
+def minha_escala(request):
+    """Portal do funcionário: exibe a escala do mês atual."""
+    if not hasattr(request.user, 'perfil_funcionario'):
+        return redirect('escala:dashboard')
+
+    func = request.user.perfil_funcionario.funcionario
+
+    hoje = date.today()
+    mes  = int(request.GET.get('mes', hoje.month))
+    ano  = int(request.GET.get('ano', hoje.year))
+
+    MESES_PT = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+
+    # ── Dados do mês navegado ──
+    try:
+        escala = Escala.objects.get(mes=mes, ano=ano)
+        dias   = DiaEscala.objects.filter(
+            escala=escala, funcionario=func
+        ).order_by('data').select_related('turno_coberto', 'setor_coberto')
+    except Escala.DoesNotExist:
+        escala = None
+        dias   = []
+
+    # ── Painel de hoje ──
+    dia_hoje      = None
+    turno_hoje    = None
+    colegas_hoje  = []
+
+    try:
+        escala_hoje = Escala.objects.get(mes=hoje.month, ano=hoje.year)
+        try:
+            dia_hoje = DiaEscala.objects.select_related(
+                'turno_coberto', 'setor_coberto'
+            ).get(escala=escala_hoje, funcionario=func, data=hoje)
+
+            # Turno do funcionário hoje
+            turno_hoje = dia_hoje.turno_coberto or func.turno
+
+            # Colegas no mesmo turno hoje (excluindo o próprio)
+            if turno_hoje and dia_hoje.situacao == 'TRABALHA':
+                colegas_hoje = list(
+                    DiaEscala.objects.filter(
+                        escala=escala_hoje,
+                        data=hoje,
+                        situacao='TRABALHA',
+                        funcionario__turno=turno_hoje,
+                    ).exclude(
+                        funcionario=func
+                    ).select_related('funcionario', 'funcionario__grupo')
+                    .order_by('funcionario__nome')
+                )
+                # também folguistas cobrindo este turno
+                colegas_folg = list(
+                    DiaEscala.objects.filter(
+                        escala=escala_hoje,
+                        data=hoje,
+                        situacao='TRABALHA',
+                        turno_coberto=turno_hoje,
+                    ).exclude(
+                        funcionario=func
+                    ).select_related('funcionario')
+                    .order_by('funcionario__nome')
+                )
+                ids_ja = {c.funcionario_id for c in colegas_hoje}
+                colegas_hoje += [c for c in colegas_folg if c.funcionario_id not in ids_ja]
+
+        except DiaEscala.DoesNotExist:
+            pass
+    except Escala.DoesNotExist:
+        pass
+
+    # Serializa turno para JS (contagem regressiva)
+    turno_json = None
+    if turno_hoje and dia_hoje and dia_hoje.situacao == 'TRABALHA':
+        turno_json = {
+            'entrada': turno_hoje.horario_entrada.strftime('%H:%M'),
+            'saida':   turno_hoje.horario_saida.strftime('%H:%M'),
+            'nome':    turno_hoje.nome,
+        }
+
+    meses_nav = [{'num': m, 'nome': MESES_PT[m]} for m in range(1, 13)]
+
+    return render(request, 'escala/minha_escala.html', {
+        'func': func,
+        'escala': escala,
+        'dias': dias,
+        'mes': mes,
+        'ano': ano,
+        'mes_nome': MESES_PT[mes],
+        'hoje': hoje,
+        'meses': meses_nav,
+        'anos': range(2024, 2031),
+        'dia_hoje': dia_hoje,
+        'turno_hoje': turno_hoje,
+        'colegas_hoje': colegas_hoje,
+        'turno_json': json.dumps(turno_json),
+    })
+
+
+@login_required
+def gerar_qrcode_funcionario(request, pk):
+    """Gera QR Code para o funcionário escanear e se cadastrar."""
+    funcionario = get_object_or_404(Funcionario, pk=pk)
+
+    url_base = request.build_absolute_uri('/')[:-1]
+    url_cadastro = f"{url_base}/funcionario/cadastro/"
+
+    img = qrcode.make(url_cadastro, box_size=8, border=4)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode()
+
+    return render(request, 'escala/qrcode_funcionario.html', {
+        'funcionario': funcionario,
+        'qr_b64': img_b64,
+        'url_cadastro': url_cadastro,
+    })
     
     return render(request, 'escala/calendario.html', context)

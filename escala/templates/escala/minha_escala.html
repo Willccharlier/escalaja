@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minha Escala — EscalaJa</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  background: #0f172a;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #f1f5f9;
+}
+
+/* ── Navbar ── */
+.navbar {
+  background: #1e293b;
+  border-bottom: 1px solid #0f172a;
+  padding: 0 20px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.nav-brand { display: flex; align-items: center; gap: 10px; }
+.nav-logo {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+}
+.nav-title { font-size: 15px; font-weight: 700; }
+.nav-sub   { font-size: 11px; color: #64748b; }
+.nav-user  { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94a3b8; }
+.nav-avatar {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: #fff;
+}
+.btn-sair {
+  padding: 6px 12px;
+  background: #0f172a; border: 1px solid #334155;
+  border-radius: 6px; color: #94a3b8; font-size: 12px;
+  cursor: pointer; text-decoration: none; margin-left: 6px;
+}
+.btn-sair:hover { color: #f1f5f9; border-color: #475569; }
+
+/* ── Layout ── */
+.content { padding: 20px; max-width: 560px; margin: 0 auto; }
+
+/* ── Card hoje ── */
+.hoje-card {
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.hoje-header {
+  padding: 20px 22px 16px;
+  position: relative;
+}
+.hoje-header.trabalha { background: linear-gradient(135deg, #1e3a5f, #1e293b); border: 1.5px solid #3b82f6; border-radius: 16px 16px 0 0; border-bottom: none; }
+.hoje-header.folga    { background: linear-gradient(135deg, #1a1f3a, #1e293b); border: 1.5px solid #6366f1; border-radius: 16px 16px 0 0; border-bottom: none; }
+.hoje-header.sem-escala { background: #1e293b; border-radius: 16px; border: 1.5px solid #334155; }
+
+.hoje-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; margin-bottom: 8px; }
+.hoje-status { font-size: 28px; font-weight: 800; margin-bottom: 4px; }
+.hoje-status.trabalha { color: #60a5fa; }
+.hoje-status.folga    { color: #a5b4fc; }
+.hoje-turno { font-size: 14px; color: #94a3b8; }
+
+/* Contagem regressiva */
+.countdown-bar {
+  background: #0f172a;
+  border: 1.5px solid #3b82f6;
+  border-top: none;
+  border-radius: 0 0 16px 16px;
+  padding: 14px 22px;
+}
+.countdown-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.countdown-item { text-align: center; flex: 1; }
+.countdown-num  { font-size: 26px; font-weight: 800; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.countdown-lbl  { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+.countdown-sep  { font-size: 24px; font-weight: 800; color: #334155; padding-bottom: 14px; }
+.progress-wrap  { height: 6px; background: #334155; border-radius: 99px; overflow: hidden; margin-bottom: 2px; }
+.progress-fill  { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #3b82f6, #6366f1); transition: width 1s linear; min-width: 4px; }
+.countdown-msg  { font-size: 12px; color: #64748b; margin-top: 8px; text-align: center; }
+
+/* Folga card body */
+.folga-body {
+  background: #0f172a;
+  border: 1.5px solid #6366f1;
+  border-top: none;
+  border-radius: 0 0 16px 16px;
+  padding: 14px 22px;
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
+}
+
+/* ── Colegas ── */
+.colegas-card {
+  background: #1e293b;
+  border-radius: 14px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.colegas-header {
+  padding: 12px 18px;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: #64748b;
+  border-bottom: 1px solid #0f172a;
+  display: flex; align-items: center; gap: 8px;
+}
+.colegas-lista { padding: 12px 18px; display: flex; flex-wrap: wrap; gap: 8px; }
+.colega-tag {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 13px; color: #cbd5e1;
+  display: flex; align-items: center; gap: 6px;
+}
+.colega-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+
+/* ── Navegação mês ── */
+.mes-nav {
+  background: #1e293b; border-radius: 12px;
+  padding: 14px 18px; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.mes-nav form { display: flex; gap: 8px; flex: 1; }
+.mes-select {
+  flex: 1; padding: 9px 12px;
+  background: #0f172a; border: 1.5px solid #334155;
+  border-radius: 8px; color: #f1f5f9; font-size: 14px;
+  appearance: none; -webkit-appearance: none;
+}
+.btn-ver {
+  padding: 9px 16px; background: #6366f1; color: #fff;
+  border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.btn-ver:hover { opacity: 0.9; }
+
+/* ── Lista dias ── */
+.mes-titulo {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: #64748b; margin-bottom: 10px;
+}
+.dia-item {
+  background: #1e293b; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 14px;
+  border-left: 4px solid transparent;
+}
+.dia-item.trabalha { border-color: #3b82f6; }
+.dia-item.folga    { border-color: #6366f1; }
+.dia-item.ferias   { border-color: #f59e0b; }
+.dia-item.falta    { border-color: #ef4444; }
+.dia-item.atestado { border-color: #06b6d4; }
+.dia-item.hoje-linha { background: #1e3a5f; }
+
+.dia-num-blk { min-width: 38px; text-align: center; }
+.dia-num  { font-size: 20px; font-weight: 800; line-height: 1; }
+.dia-num.dom { color: #f59e0b; }
+.dia-wday { font-size: 9px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.dia-info { flex: 1; }
+.dia-status-txt { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+.dia-sub    { font-size: 11px; color: #64748b; margin-top: 2px; }
+.dia-icon   { font-size: 18px; }
+
+.sem-escala { text-align: center; padding: 48px 20px; color: #475569; }
+.sem-escala .icon { font-size: 44px; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-brand">
+    <div class="nav-logo">📋</div>
+    <div>
+      <div class="nav-title">EscalaJa</div>
+      <div class="nav-sub">Portal do Funcionário</div>
+    </div>
+  </div>
+  <div class="nav-user">
+    <div class="nav-avatar">{{ func.nome.0 }}</div>
+    <span style="display:none;"> </span>
+    <a href="{% url 'escala:logout' %}" class="btn-sair">Sair</a>
+  </div>
+</nav>
+
+<div class="content">
+
+  {# ── PAINEL DE HOJE ── #}
+  {% if dia_hoje %}
+    {% if dia_hoje.situacao == 'TRABALHA' %}
+    <div class="hoje-card">
+      <div class="hoje-header trabalha">
+        <div class="hoje-label">Hoje — {{ hoje|date:"d/m/Y" }} · {{ func.nome.split.0 }}</div>
+        <div class="hoje-status trabalha">
+          {% if turno_hoje %}{{ turno_hoje.nome }}{% else %}Trabalhando{% endif %}
+        </div>
+        {% if turno_hoje %}
+        <div class="hoje-turno">
+          {{ turno_hoje.horario_entrada|time:"H:i" }} → {{ turno_hoje.horario_saida|time:"H:i" }}
+          {% if func.grupo %} · {{ func.grupo.nome }}{% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="countdown-bar">
+        <div class="countdown-row">
+          <div class="countdown-item"><div class="countdown-num" id="cd-h">--</div><div class="countdown-lbl">horas</div></div>
+          <div class="countdown-sep">:</div>
+          <div class="countdown-item"><div class="countdown-num" id="cd-m">--</div><div class="countdown-lbl">min</div></div>
+          <div class="countdown-sep">:</div>
+          <div class="countdown-item"><div class="countdown-num" id="cd-s">--</div><div class="countdown-lbl">seg</div></div>
+        </div>
+        <div class="progress-wrap"><div class="progress-fill" id="cd-prog" style="width:0%"></div></div>
+        <div class="countdown-msg" id="cd-msg"></div>
+      </div>
+    </div>
+
+    {% if colegas_hoje %}
+    <div class="colegas-card">
+      <div class="colegas-header">👥 Colegas no mesmo turno hoje</div>
+      <div class="colegas-lista">
+        {% for c in colegas_hoje %}
+        <div class="colega-tag"><div class="colega-dot"></div>{{ c.funcionario.nome.split.0 }} {{ c.funcionario.nome.split.1|default:"" }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% elif dia_hoje.situacao == 'FOLGA' or dia_hoje.situacao == 'FOLGA_COMPENSADA' %}
+    <div class="hoje-card">
+      <div class="hoje-header folga">
+        <div class="hoje-label">Hoje — {{ hoje|date:"d/m/Y" }} · {{ func.nome.split.0 }}</div>
+        <div class="hoje-status folga">🏖️ Dia de Folga</div>
+        <div class="hoje-turno">Aproveite seu descanso!</div>
+      </div>
+      <div class="folga-body">Você não tem trabalho agendado para hoje.</div>
+    </div>
+
+    {% elif dia_hoje.situacao == 'FERIAS' %}
+    <div class="hoje-card">
+      <div class="hoje-header folga">
+        <div class="hoje-label">Hoje — {{ hoje|date:"d/m/Y" }}</div>
+        <div class="hoje-status folga">🌴 Férias</div>
+      </div>
+      <div class="folga-body">Você está de férias. Bom descanso!</div>
+    </div>
+
+    {% else %}
+    <div class="hoje-card">
+      <div class="hoje-header sem-escala">
+        <div class="hoje-label">Hoje — {{ hoje|date:"d/m/Y" }}</div>
+        <div class="hoje-status" style="color:#f59e0b;">{{ dia_hoje.get_situacao_display }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+  {% else %}
+  <div class="hoje-card">
+    <div class="hoje-header sem-escala" style="border-radius:16px;">
+      <div class="hoje-label">Hoje — {{ hoje|date:"d/m/Y" }}</div>
+      <div class="hoje-status" style="color:#64748b;font-size:16px;">Sem escala gerada para este mês</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── NAVEGAÇÃO MÊS ── #}
+  <div class="mes-nav">
+    <form method="GET">
+      <select name="mes" class="mes-select">
+        {% for m in meses %}<option value="{{ m.num }}" {% if m.num == mes %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}
+      </select>
+      <select name="ano" class="mes-select" style="max-width:86px;">
+        {% for a in anos %}<option value="{{ a }}" {% if a == ano %}selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="btn-ver">Ver</button>
+    </form>
+  </div>
+
+  {# ── LISTA DO MÊS ── #}
+  {% if not escala %}
+  <div class="sem-escala">
+    <div class="icon">📭</div>
+    <p>Nenhuma escala gerada para {{ mes_nome }} {{ ano }}.</p>
+  </div>
+  {% else %}
+  <div class="mes-titulo">{{ mes_nome }} {{ ano }}</div>
+  {% for dia in dias %}
+  <div class="dia-item
+    {% if dia.situacao == 'TRABALHA' %}trabalha
+    {% elif dia.situacao == 'FOLGA' or dia.situacao == 'FOLGA_COMPENSADA' %}folga
+    {% elif dia.situacao == 'FERIAS' %}ferias
+    {% elif dia.situacao == 'FALTA' %}falta
+    {% elif dia.situacao == 'ATESTADO' %}atestado{% endif %}
+    {% if dia.data == hoje %}hoje-linha{% endif %}">
+    <div class="dia-num-blk">
+      <div class="dia-num {% if dia.data.weekday == 6 %}dom{% endif %}">{{ dia.data.day|stringformat:"02d" }}</div>
+      <div class="dia-wday">
+        {% if dia.data.weekday == 0 %}SEG{% elif dia.data.weekday == 1 %}TER{% elif dia.data.weekday == 2 %}QUA{% elif dia.data.weekday == 3 %}QUI{% elif dia.data.weekday == 4 %}SEX{% elif dia.data.weekday == 5 %}SÁB{% else %}DOM{% endif %}
+      </div>
+    </div>
+    <div class="dia-info">
+      <div class="dia-status-txt">
+        {% if dia.situacao == 'TRABALHA' %}{% if dia.turno_coberto %}{{ dia.turno_coberto.nome }}{% elif func.turno %}{{ func.turno.nome }}{% else %}Trabalha{% endif %}
+        {% elif dia.situacao == 'FOLGA' %}Folga
+        {% elif dia.situacao == 'FOLGA_COMPENSADA' %}Folga Compensada
+        {% elif dia.situacao == 'FERIAS' %}Férias
+        {% elif dia.situacao == 'FALTA' %}Falta
+        {% elif dia.situacao == 'ATESTADO' %}Atestado{% endif %}
+      </div>
+      <div class="dia-sub">
+        {% if dia.situacao == 'TRABALHA' %}{% if dia.setor_coberto %}{{ dia.setor_coberto.nome }}{% elif func.grupo %}{{ func.grupo.nome }}{% endif %}{% endif %}
+        {% if dia.data == hoje %}<strong style="color:#6366f1;"> · Hoje</strong>{% endif %}
+      </div>
+    </div>
+    <div class="dia-icon">
+      {% if dia.situacao == 'TRABALHA' %}🟢{% elif dia.situacao == 'FOLGA' or dia.situacao == 'FOLGA_COMPENSADA' %}🔵{% elif dia.situacao == 'FERIAS' %}🌴{% elif dia.situacao == 'FALTA' %}🔴{% elif dia.situacao == 'ATESTADO' %}🩺{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+</div>
+
+<script>
+const turno = {{ turno_json|safe }};
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function tick() {
+  if (!turno) return;
+
+  const agora = new Date();
+  const [he, me] = turno.entrada.split(':').map(Number);
+  const [hs, ms] = turno.saida.split(':').map(Number);
+
+  const entrada = new Date(agora); entrada.setHours(he, me, 0, 0);
+  const saida   = new Date(agora); saida.setHours(hs, ms, 0, 0);
+  // Se saída < entrada, turno vira a meia-noite
+  if (saida <= entrada) saida.setDate(saida.getDate() + 1);
+
+  const total = saida - entrada;
+  let diff, msg, pct;
+
+  if (agora < entrada) {
+    diff = entrada - agora;
+    msg  = 'para o turno começar';
+    pct  = 0;
+  } else if (agora < saida) {
+    diff = saida - agora;
+    msg  = 'restantes no turno';
+    pct  = ((agora - entrada) / total) * 100;
+  } else {
+    document.getElementById('cd-h').textContent = '00';
+    document.getElementById('cd-m').textContent = '00';
+    document.getElementById('cd-s').textContent = '00';
+    document.getElementById('cd-msg').textContent = 'Turno encerrado';
+    document.getElementById('cd-prog').style.width = '100%';
+    return;
+  }
+
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+
+  document.getElementById('cd-h').textContent = pad(h);
+  document.getElementById('cd-m').textContent = pad(m);
+  document.getElementById('cd-s').textContent = pad(s);
+  document.getElementById('cd-msg').textContent = msg;
+  document.getElementById('cd-prog').style.width = pct.toFixed(1) + '%';
+}
+
+if (turno) { tick(); setInterval(tick, 1000); }
+</script>
+
+</body>
+</html>
