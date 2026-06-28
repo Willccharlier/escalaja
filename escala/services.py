@@ -890,6 +890,12 @@ class GeradorEscala:
 
             minimo = func.turno.minimo_funcionarios if func.turno else 0
 
+            # Pré-carregar folguistas com turnos habilitados
+            folguistas_ativos = list(
+                Funcionario.objects.filter(tipo='FOLGUISTA', ativo=True)
+                .prefetch_related('turnos_habilitados')
+            )
+
             for domingo in domingos:
                 if self.escala_gerada[func.id].get(domingo) != 'TRABALHA':
                     continue
@@ -898,13 +904,23 @@ class GeradorEscala:
                 if not semana_domingo:
                     continue
 
-                # Verificar se há cobertura suficiente no domingo SÓ pelo turno deste funcionário
+                # Cobertura regular no domingo
                 colegas = colegas_turno[func.id]
-                outros_no_domingo = sum(
+                regulares_no_domingo = sum(
                     1 for f in colegas
                     if self.escala_gerada.get(f.id, {}).get(domingo) == 'TRABALHA'
                 )
-                if outros_no_domingo < minimo:
+
+                # Folguistas disponíveis (trabalhando no domingo, habilitados para este turno)
+                folguistas_cobrindo = [
+                    f for f in folguistas_ativos
+                    if (self.escala_gerada.get(f.id, {}).get(domingo) == 'TRABALHA'
+                        and func.turno
+                        and func.turno.id in f.turnos_habilitados.values_list('id', flat=True))
+                ]
+
+                cobertura_total = regulares_no_domingo + len(folguistas_cobrindo)
+                if cobertura_total < minimo:
                     continue
 
                 trocou = False
@@ -917,14 +933,32 @@ class GeradorEscala:
                     self.escala_gerada[func.id][domingo] = 'FOLGA'
                     self.escala_gerada[func.id][dia] = 'TRABALHA'
 
+                    # Atualizar turno_coberto do folguista ANTES de validar,
+                    # pois a validação conta folguistas via turno_coberto
+                    folg_backup = None
+                    if folguistas_cobrindo and func.turno:
+                        folg = folguistas_cobrindo[0]
+                        old_turno = self.turno_coberto.get(folg.id, {}).get(domingo)
+                        folg_backup = (folg.id, domingo, old_turno)
+                        if folg.id not in self.turno_coberto:
+                            self.turno_coberto[folg.id] = {}
+                        self.turno_coberto[folg.id][domingo] = func.turno.id
+
                     if (self._validar_consecutividade_funcionario(func.id) and
                             self._validar_lotacao_dias_especificos([domingo, dia])):
                         trocas_realizadas += 1
                         trocou = True
                         break
                     else:
+                        # Reverter tudo
                         self.escala_gerada[func.id][domingo] = 'TRABALHA'
                         self.escala_gerada[func.id][dia] = 'FOLGA'
+                        if folg_backup:
+                            fid, d, old_t = folg_backup
+                            if old_t is None:
+                                self.turno_coberto.get(fid, {}).pop(d, None)
+                            else:
+                                self.turno_coberto[fid][d] = old_t
 
                 if trocou:
                     break

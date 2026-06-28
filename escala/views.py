@@ -344,7 +344,7 @@ def revalidar_escala(request, pk):
         else:
             alertas.append("✅ Sem folgas consecutivas!")
 
-    # 2. Validar domingos de folga
+    # 2. Validar domingos de folga (apenas 6x1)
     alertas.append("\n🔍 VALIDANDO DOMINGOS DE FOLGA...")
 
     domingos = [
@@ -356,6 +356,8 @@ def revalidar_escala(request, pk):
     if domingos:
         for func_id, dias_func in escala_gerada.items():
             funcionario = Funcionario.objects.get(id=func_id)
+            if funcionario.regime != '6x1':
+                continue  # domingo de folga só é exigido para 6x1
             tem_domingo = any(
                 dias_func.get(dom, 'TRABALHA') in ['FOLGA', 'FOLGA_COMPENSADA', 'FOLGA_ANIVERSARIO', 'FOLGA_FERIADO', 'FERIAS', 'ATESTADO']
                 for dom in domingos
@@ -367,28 +369,41 @@ def revalidar_escala(request, pk):
             alertas.append("⚠️ Sem nenhum domingo de folga:")
             alertas.extend([f"   {p}" for p in problemas_domingo])
         else:
-            alertas.append("✅ Todos têm pelo menos 1 domingo de folga!")
-    
-    # 3. Validar lotação mínima
+            alertas.append("✅ Todos os funcionários 6x1 têm pelo menos 1 domingo de folga!")
+
+    # 3. Validar lotação mínima (conta regulares + folguistas via turno_coberto)
     alertas.append("\n🔍 VALIDANDO LOTAÇÃO MÍNIMA...")
     turnos = Turno.objects.all()
     problemas_lotacao = []
-    
+
+    # Montar turno_coberto a partir do banco
+    turno_coberto_db = {}  # {func_id: {dia: turno_id}}
+    for dia_obj in DiaEscala.objects.filter(escala=escala).select_related('turno_coberto', 'funcionario'):
+        if dia_obj.funcionario.tipo == 'FOLGUISTA' and dia_obj.turno_coberto:
+            fid = dia_obj.funcionario.id
+            if fid not in turno_coberto_db:
+                turno_coberto_db[fid] = {}
+            turno_coberto_db[fid][dia_obj.data.day] = dia_obj.turno_coberto.id
+
     for dia in range(1, dias_mes + 1):
         for turno in turnos:
             funcionarios_turno = Funcionario.objects.filter(
-                tipo='REGULAR',
-                ativo=True,
-                turno=turno
+                tipo='REGULAR', ativo=True, turno=turno
             )
-            
-            trabalhando = 0
-            for func in funcionarios_turno:
-                if func.id in escala_gerada:
-                    situacao = escala_gerada[func.id].get(dia, 'TRABALHA')
-                    if situacao == 'TRABALHA':
-                        trabalhando += 1
-            
+
+            regulares = sum(
+                1 for func in funcionarios_turno
+                if escala_gerada.get(func.id, {}).get(dia, 'TRABALHA') == 'TRABALHA'
+            )
+
+            folguistas = sum(
+                1 for fid, dias_turno in turno_coberto_db.items()
+                if dias_turno.get(dia) == turno.id
+                and escala_gerada.get(fid, {}).get(dia) == 'TRABALHA'
+            )
+
+            trabalhando = regulares + folguistas
+
             if trabalhando < turno.minimo_funcionarios:
                 problemas_lotacao.append(
                     f"⚠️ DIA {dia:02d}/{escala.mes:02d} - "
@@ -1180,7 +1195,14 @@ def calendario_view(request):
         if escala:
             for dia_obj in dias_escala:
                 if dia_obj.data.day == dia and dia_obj.situacao == 'TRABALHA':
-                    turno_nome = dia_obj.funcionario.turno.nome
+                    if dia_obj.funcionario.turno is None:
+                        # Folguista: aparece no turno que está cobrindo
+                        turno_obj = dia_obj.turno_coberto
+                        if turno_obj is None:
+                            continue
+                        turno_nome = turno_obj.nome
+                    else:
+                        turno_nome = dia_obj.funcionario.turno.nome
                     if turno_nome in turnos_info:
                         turnos_info[turno_nome]['funcionarios'].append(dia_obj.funcionario.nome)
 
