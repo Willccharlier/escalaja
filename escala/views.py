@@ -62,6 +62,26 @@ def logout_view(request):
     return redirect('escala:login')
 
 
+def logout_funcionario(request):
+    logout(request)
+    return redirect('escala:portal_funcionario')
+
+
+@login_required
+def resetar_senha_funcionario(request, pk):
+    if request.method == 'POST':
+        func = get_object_or_404(Funcionario, pk=pk)
+        try:
+            perfil = func.perfil
+            user = perfil.user
+            perfil.delete()
+            user.delete()
+            messages.success(request, f'✅ Senha de {func.nome} resetada. Ele poderá criar uma nova senha no portal.')
+        except PerfilFuncionario.DoesNotExist:
+            pass
+    return redirect('escala:funcionario_lista')
+
+
 # ==================== DASHBOARD ====================
 
 @login_required
@@ -1977,7 +1997,15 @@ def portal_funcionario(request):
                     return redirect('escala:minha_escala')
                 erro = 'Senha incorreta.'
             else:
-                erro = 'Nome não encontrado. Verifique se já fez o cadastro.'
+                # Verifica se o funcionário existe mas teve a senha resetada
+                func_sem_acesso = Funcionario.objects.filter(
+                    ativo=True, nome__icontains=nome
+                ).filter(perfil__isnull=True).exists()
+                if func_sem_acesso:
+                    erro = 'Sua senha foi resetada. Use a aba "Primeiro acesso" para criar uma nova senha.'
+                    modo = 'cadastro'
+                else:
+                    erro = 'Nome não encontrado. Verifique se já fez o cadastro.'
             modo = 'login'
 
         # ── BUSCA PARA CADASTRO ──
@@ -2208,29 +2236,33 @@ def minha_escala(request):
                 'turno_coberto', 'setor_coberto'
             ).get(escala=escala_hoje, funcionario=func, data=hoje)
 
-            # Turno do funcionário hoje
+            # Turno e setor do funcionário hoje
             turno_hoje = dia_hoje.turno_coberto or func.turno
+            setor_hoje = dia_hoje.setor_coberto or func.grupo
 
-            # Colegas no mesmo turno hoje (excluindo o próprio)
-            if turno_hoje and dia_hoje.situacao == 'TRABALHA':
+            # Colegas no mesmo setor + turno hoje (excluindo o próprio)
+            if turno_hoje and setor_hoje and dia_hoje.situacao == 'TRABALHA':
+                # Regulares: mesmo turno fixo E mesmo grupo
                 colegas_hoje = list(
                     DiaEscala.objects.filter(
                         escala=escala_hoje,
                         data=hoje,
                         situacao='TRABALHA',
                         funcionario__turno=turno_hoje,
+                        funcionario__grupo=setor_hoje,
                     ).exclude(
                         funcionario=func
                     ).select_related('funcionario', 'funcionario__grupo')
                     .order_by('funcionario__nome')
                 )
-                # também folguistas cobrindo este turno
+                # Folguistas: cobrindo exatamente este turno + setor hoje
                 colegas_folg = list(
                     DiaEscala.objects.filter(
                         escala=escala_hoje,
                         data=hoje,
                         situacao='TRABALHA',
                         turno_coberto=turno_hoje,
+                        setor_coberto=setor_hoje,
                     ).exclude(
                         funcionario=func
                     ).select_related('funcionario')

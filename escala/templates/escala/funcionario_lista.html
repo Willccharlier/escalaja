@@ -209,6 +209,17 @@
             <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
                 📱 QR Code
             </a>
+            {% if func.perfil %}
+            <span style="font-size:11px;color:#6ee7b7;font-weight:600;">✅ Tem acesso</span>
+            <form method="POST" action="{% url 'escala:resetar_senha_funcionario' func.pk %}"
+                  style="display: inline;"
+                  onsubmit="return confirm('Resetar senha de {{ func.nome }}? O funcionário precisará criar uma nova senha.');">
+                {% csrf_token %}
+                <button type="submit" class="btn-small" style="background:#f59e0b;color:#000;">🔑 Resetar senha</button>
+            </form>
+            {% else %}
+            <span style="font-size:11px;color:#94a3b8;font-weight:600;">⚪ Sem acesso</span>
+            {% endif %}
             <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}"
                   style="display: inline;"
                   onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">
@@ -273,6 +284,17 @@
             <a href="{% url 'escala:qrcode_funcionario' func.pk %}" class="btn-small" style="background:#6366f1;color:#fff;">
                 📱 QR Code
             </a>
+            {% if func.perfil %}
+            <span style="font-size:11px;color:#6ee7b7;font-weight:600;">✅ Tem acesso</span>
+            <form method="POST" action="{% url 'escala:resetar_senha_funcionario' func.pk %}"
+                  style="display: inline;"
+                  onsubmit="return confirm('Resetar senha de {{ func.nome }}? O funcionário precisará criar uma nova senha.');">
+                {% csrf_token %}
+                <button type="submit" class="btn-small" style="background:#f59e0b;color:#000;">🔑 Resetar senha</button>
+            </form>
+            {% else %}
+            <span style="font-size:11px;color:#94a3b8;font-weight:600;">⚪ Sem acesso</span>
+            {% endif %}
             <form method="POST" action="{% url 'escala:funcionario_deletar' func.pk %}"
                   style="display: inline;"
                   onsubmit="return confirm('Tem certeza que deseja remover {{ func.nome }}?');">

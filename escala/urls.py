@@ -55,6 +55,8 @@ urlpatterns = [
 
     # Portal do funcionário
     path('funcionario/', views.portal_funcionario, name='portal_funcionario'),
+    path('funcionario/logout/', views.logout_funcionario, name='logout_funcionario'),
+    path('funcionarios/<int:pk>/resetar-senha/', views.resetar_senha_funcionario, name='resetar_senha_funcionario'),
     path('funcionario/minha-escala/', views.minha_escala, name='minha_escala'),
     path('funcionarios/<int:pk>/qrcode/', views.gerar_qrcode_funcionario, name='qrcode_funcionario'),
 ]
