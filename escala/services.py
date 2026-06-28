@@ -118,11 +118,21 @@ class GeradorEscala:
                 else:
                     self.alertas.append("\n⏭️ Regra de folgas consecutivas desativada")
                 
-                # 9. Validações finais e alertas
+                # 9. Re-verificar consecutivos de trabalho após todas as redistribuições
+                # (domingo, redistribuição de lotação e remoção de folgas extras podem ter
+                # criado novas sequências acima do limite CLT)
+                self.alertas.append("\n🔧 RE-VERIFICANDO CONSECUTIVOS DE TRABALHO (pós-redistribuição)...")
+                corr_final = self._corrigir_maximos_consecutivos()
+                if corr_final > 0:
+                    self.alertas.append(f"   ✅ {corr_final} correções adicionais de consecutivos!")
+                else:
+                    self.alertas.append("   ✅ Consecutivos OK!")
+
+                # 10. Validações finais e alertas
                 self._validar_e_alertar_consecutividade()
                 self._validar_e_alertar_domingo_folga()
-                
-                # 10. Salvar no banco
+
+                # 11. Salvar no banco
                 self._salvar_dias_escala(escala)
                 
                 # 11. Definir status final
@@ -158,7 +168,7 @@ class GeradorEscala:
         correcoes = 0
 
         funcionarios = list(Funcionario.objects.filter(
-            id__in=self.escala_gerada.keys(), tipo='REGULAR'
+            id__in=self.escala_gerada.keys()
         ))
         max_por_regime = {'5x2': 5, '6x1': 6}
 
@@ -826,8 +836,10 @@ class GeradorEscala:
             for func in funcionarios:
                 self.escala_gerada[func.id] = estado_backup[func.id].copy()
 
-        # Fallback: dá folgas mesmo sem manter mínimo (ex: único funcionário no turno)
-        # O déficit será reportado pela validação de lotação — o funcionário NÃO pode ficar sem folga
+        # Fallback: dá folgas ignorando mínimo, mas SEMPRE respeitando limite de consecutivos (CLT)
+        sabado_semana_fb = next(
+            (d for d in dias_semana if date(self.ano, self.mes, d).weekday() == 5), None
+        )
         for func in funcionarios:
             folgas_necessarias = self._folgas_semana(func, dias_count)
             if folgas_necessarias == 0:
@@ -836,7 +848,13 @@ class GeradorEscala:
             if ja_tem >= folgas_necessarias:
                 continue
 
-            combinacoes_fixas = self._combinacoes_dia_fixo(func, dias_semana, folgas_necessarias)
+            limite_consec = 6 if func.regime == '6x1' else 5
+            fixas_raw = self._combinacoes_dia_fixo(func, dias_semana, folgas_necessarias) or []
+            combinacoes_fixas = [
+                c for c in fixas_raw
+                if self._combinacao_respeita_consecutivos(func.id, c, dias_semana, semana_anterior, limite_consec)
+            ]
+
             if combinacoes_fixas:
                 combinacao = random.choice(combinacoes_fixas)
             else:
@@ -846,7 +864,19 @@ class GeradorEscala:
                     combinacoes = self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, False)
                 if not combinacoes:
                     continue
-                if domingo_semana:
+
+                # Aplicar limite de consecutivos no fallback também
+                validas = [
+                    c for c in combinacoes
+                    if self._combinacao_respeita_consecutivos(func.id, c, dias_semana, semana_anterior, limite_consec)
+                ]
+                combinacoes = validas if validas else combinacoes  # se nada passar, aceita qualquer uma
+
+                # Prioridade fim de semana
+                if func.regime == '5x2' and sabado_semana_fb and domingo_semana:
+                    par = [c for c in combinacoes if sabado_semana_fb in c and domingo_semana in c]
+                    combinacoes = par + [c for c in combinacoes if c not in par]
+                elif domingo_semana:
                     combinacoes = self._ordenar_com_prioridade_domingo(
                         combinacoes, domingo_semana, func.id, domingo_semana
                     )

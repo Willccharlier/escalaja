@@ -246,6 +246,7 @@ def escala_detalhe(request, pk):
         'calendario_dias': calendario_dias,
         'turnos_data': turnos_data,
         'folguistas_data': folguistas_data,
+        'turnos_disponiveis': Turno.objects.all().order_by('horario_entrada'),
     }
     return render(request, 'escala/escala_detalhe.html', context)
 
@@ -456,6 +457,36 @@ def alterar_situacao_dia(request):
             defaults={'situacao': nova_situacao}
         )
         dia_escala.situacao = nova_situacao
+        dia_escala.save()
+
+        return JsonResponse({'sucesso': True})
+
+    except Exception as e:
+        return JsonResponse({'sucesso': False, 'erro': str(e)})
+
+
+@login_required
+@require_POST
+def alterar_turno_coberto(request):
+    """Altera o turno coberto por um folguista em um dia específico"""
+    try:
+        data = json.loads(request.body)
+        escala_id = data['escala_id']
+        funcionario_id = data['funcionario_id']
+        dia = int(data['dia'])
+        turno_id = data.get('turno_id') or None
+
+        escala = Escala.objects.get(id=escala_id)
+        funcionario = Funcionario.objects.get(id=funcionario_id)
+
+        if funcionario.tipo != 'FOLGUISTA':
+            return JsonResponse({'sucesso': False, 'erro': 'Funcionário não é folguista!'})
+
+        data_dia = date(escala.ano, escala.mes, dia)
+        turno = Turno.objects.get(id=turno_id) if turno_id else None
+
+        dia_escala = DiaEscala.objects.get(escala=escala, funcionario=funcionario, data=data_dia)
+        dia_escala.turno_coberto = turno
         dia_escala.save()
 
         return JsonResponse({'sucesso': True})
@@ -1178,6 +1209,15 @@ def calendario_view(request):
     )
     feriados_dict = {f.data.day: f for f in feriados}
 
+    # Buscar turnos reais do banco (ordenados por horário)
+    turnos_db = list(Turno.objects.all().order_by('horario_entrada'))
+
+    # Pré-indexar dias_escala por dia para evitar O(n²)
+    dias_escala_por_dia = {}
+    for dia_obj in dias_escala:
+        d = dia_obj.data.day
+        dias_escala_por_dia.setdefault(d, []).append(dia_obj)
+
     # Organizar dados por dia
     calendario_dias = []
     calendario_dias_json = []
@@ -1186,32 +1226,31 @@ def calendario_view(request):
         data = date(ano, mes, dia)
         dia_semana = data.weekday()
 
+        # Inicializa turnos_info com os nomes reais do banco
         turnos_info = {
-            'MANHA': {'funcionarios': [], 'minimo': 0, 'atual': 0},
-            'TARDE': {'funcionarios': [], 'minimo': 0, 'atual': 0},
-            'NOITE': {'funcionarios': [], 'minimo': 0, 'atual': 0},
+            t.nome: {'nome': t.nome, 'funcionarios': [], 'minimo': t.minimo_funcionarios, 'atual': 0}
+            for t in turnos_db
         }
 
         if escala:
-            for dia_obj in dias_escala:
-                if dia_obj.data.day == dia and dia_obj.situacao == 'TRABALHA':
-                    if dia_obj.funcionario.turno is None:
-                        # Folguista: aparece no turno que está cobrindo
-                        turno_obj = dia_obj.turno_coberto
-                        if turno_obj is None:
-                            continue
-                        turno_nome = turno_obj.nome
-                    else:
-                        turno_nome = dia_obj.funcionario.turno.nome
-                    if turno_nome in turnos_info:
-                        turnos_info[turno_nome]['funcionarios'].append(dia_obj.funcionario.nome)
+            for dia_obj in dias_escala_por_dia.get(dia, []):
+                if dia_obj.situacao != 'TRABALHA':
+                    continue
+                if dia_obj.funcionario.turno is None:
+                    # Folguista: aparece no turno que está cobrindo
+                    turno_obj = dia_obj.turno_coberto
+                    if turno_obj is None:
+                        continue
+                    turno_nome = turno_obj.nome
+                else:
+                    turno_nome = dia_obj.funcionario.turno.nome
+                if turno_nome in turnos_info:
+                    turnos_info[turno_nome]['funcionarios'].append(dia_obj.funcionario.nome)
 
-            turnos = Turno.objects.all()
-            for turno in turnos:
-                if turno.nome in turnos_info:
-                    turnos_info[turno.nome]['minimo'] = turno.minimo_funcionarios
-                    turnos_info[turno.nome]['atual'] = len(turnos_info[turno.nome]['funcionarios'])
+            for info in turnos_info.values():
+                info['atual'] = len(info['funcionarios'])
 
+        turnos_lista = list(turnos_info.values())
         feriado_obj = feriados_dict.get(dia)
 
         dia_info = {
@@ -1225,6 +1264,7 @@ def calendario_view(request):
             'eh_futuro': data > hoje,
             'feriado': feriado_obj,
             'turnos': turnos_info,
+            'turnos_lista': turnos_lista,
         }
 
         calendario_dias.append(dia_info)
@@ -1243,7 +1283,7 @@ def calendario_view(request):
                 'tipo': feriado_obj.get_tipo_display(),
                 'eh_dia_util': feriado_obj.eh_dia_util()
             } if feriado_obj else None,
-            'turnos': turnos_info,
+            'turnos_lista': turnos_lista,
         }
 
         calendario_dias_json.append(dia_info_json)
