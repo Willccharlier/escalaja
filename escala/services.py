@@ -432,6 +432,14 @@ class GeradorEscala:
 
         minimo = turno.minimo_funcionarios
 
+        # Folguistas habilitados para este turno funcionam como cobertura de backup.
+        # O mínimo efetivo para regulares é reduzido por quantos folguistas podem cobrir,
+        # permitindo que regulares (ex: único do NOITE) folguem no domingo sem bloqueio.
+        folguistas_backup = Funcionario.objects.filter(
+            tipo='FOLGUISTA', ativo=True, turnos_habilitados=turno
+        ).count()
+        minimo_regulares = max(0, minimo - folguistas_backup)
+
         # Inicializar: todos trabalham
         for func in funcionarios:
             self.escala_gerada[func.id] = {dia: 'TRABALHA' for dia in range(1, self.dias_mes + 1)}
@@ -441,7 +449,7 @@ class GeradorEscala:
         # Processar todos juntos — quota individual por regime
         for idx_semana, semana in enumerate(semanas):
             semana_anterior = semanas[idx_semana - 1] if idx_semana > 0 else None
-            sucesso = self._processar_semana(funcionarios, semana, minimo, idx_semana + 1, semana_anterior)
+            sucesso = self._processar_semana(funcionarios, semana, minimo_regulares, idx_semana + 1, semana_anterior)
             if not sucesso:
                 self.alertas.append(f"⚠️ Semana {idx_semana + 1}: Impossível distribuir folgas!")
 
@@ -689,6 +697,26 @@ class GeradorEscala:
         random.shuffle(sem_dom)
         return com_dom + sem_dom
 
+    def _combinacao_respeita_consecutivos(self, func_id, combinacao, dias_semana, semana_anterior, limite):
+        """Retorna True se a combinação de folgas não gera mais de 'limite' dias consecutivos de trabalho."""
+        folgas = set(combinacao)
+        # Streak no final da semana anterior
+        streak = 0
+        if semana_anterior:
+            for d in reversed(semana_anterior):
+                if self.escala_gerada[func_id].get(d) == 'TRABALHA':
+                    streak += 1
+                else:
+                    break
+        for d in dias_semana:
+            if d in folgas:
+                streak = 0
+            else:
+                streak += 1
+                if streak > limite:
+                    return False
+        return True
+
     def _processar_semana(self, funcionarios, dias_semana, minimo, num_semana, semana_anterior=None):
         """Processa uma semana atribuindo folgas individuais respeitando o mínimo global do turno"""
         dias_count = len(dias_semana)
@@ -747,26 +775,38 @@ class GeradorEscala:
                     sucesso_total = False
                     break
 
-                # Filtrar consecutividade entre semanas
-                if semana_anterior and exigir_nc:
-                    ultimo_dia_anterior = semana_anterior[-1]
-                    filtradas = [
-                        c for c in combinacoes
-                        if not (min(c) == dias_semana[0] and
-                                self.escala_gerada[func_id].get(ultimo_dia_anterior) != 'TRABALHA')
-                    ]
-                    if filtradas:
-                        combinacoes = filtradas
+                # Filtrar combinações que violam o limite máximo de dias consecutivos (CLT)
+                limite_consec = 6 if func.regime == '6x1' else 5
+                combinacoes = [
+                    c for c in combinacoes
+                    if self._combinacao_respeita_consecutivos(func_id, c, dias_semana, semana_anterior, limite_consec)
+                ]
+                # Se nenhuma combinação respeita, aceita qualquer uma (semana muito curta ou caso extremo)
+                if not combinacoes:
+                    combinacoes = combinacoes_fixas or self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, False) or []
 
                 if not combinacoes:
                     sucesso_total = False
                     break
 
-                # Ordenar: domingo na frente se funcionário ainda não tem
+                # Ordenar combinações por prioridade de fim de semana
                 if not combinacoes_fixas:
-                    combinacoes = self._ordenar_com_prioridade_domingo(
-                        combinacoes, domingo_semana, func_id, domingo_semana or dias_semana[0]
+                    sabado_semana = next(
+                        (d for d in dias_semana if date(self.ano, self.mes, d).weekday() == 5),
+                        None
                     )
+                    if func.regime == '5x2' and sabado_semana and domingo_semana:
+                        # 5x2: prioridade SAB+DOM juntos, depois SAB ou DOM separado, resto
+                        par_fds = [c for c in combinacoes if sabado_semana in c and domingo_semana in c]
+                        so_sab = [c for c in combinacoes if sabado_semana in c and domingo_semana not in c]
+                        so_dom = [c for c in combinacoes if domingo_semana in c and sabado_semana not in c]
+                        outros = [c for c in combinacoes if sabado_semana not in c and domingo_semana not in c]
+                        combinacoes = par_fds + so_sab + so_dom + outros
+                    else:
+                        # 6x1 ou semana sem SAB+DOM: prioridade domingo
+                        combinacoes = self._ordenar_com_prioridade_domingo(
+                            combinacoes, domingo_semana, func_id, domingo_semana or dias_semana[0]
+                        )
 
                 folga_atribuida = False
                 for combinacao in combinacoes:
