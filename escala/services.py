@@ -19,6 +19,7 @@ class GeradorEscala:
         self.escala_gerada = {}   # {funcionario_id: {dia: situacao}}
         self.turno_coberto = {}   # {funcionario_id: {dia: turno_id}} — só folguistas
         self.setor_coberto = {}   # {funcionario_id: {dia: grupo_id}} — só folguistas
+        self.domingo_garantido = {}  # {funcionario_id: dia} — domingo R1, nunca remover
         self.config = ConfiguracaoSistema.get()
         
     def gerar(self):
@@ -50,13 +51,22 @@ class GeradorEscala:
                 # 3. Buscar feriados do mês
                 feriados = self._buscar_feriados_mes()
 
-                # 4. Gerar escala POR SETOR com folgas/semana por regime
+                # 4. R1+R2: Garantir 1 domingo por funcionário ANTES de qualquer outra folga
+                todos_regulares = list(Funcionario.objects.filter(
+                    tipo='REGULAR', ativo=True
+                ).select_related('grupo', 'turno'))
+                for func in todos_regulares:
+                    self.escala_gerada[func.id] = {dia: 'TRABALHA' for dia in range(1, self.dias_mes + 1)}
+                self._garantir_domingos(todos_regulares)
+                self.alertas.append("✅ Domingos garantidos (R1+R2)")
+
+                # 5. Gerar escala POR SETOR com folgas/semana por regime
                 for setor in setores:
                     sucesso_setor = self._gerar_escala_setor(setor, feriados)
                     if not sucesso_setor:
                         self.alertas.append(f"❌ Impossível gerar escala para setor {setor.nome}")
 
-                # 4b. Gerar folgas dos folguistas e escalá-los nas coberturas de setor
+                # 5b. Gerar folgas dos folguistas e escalá-los nas coberturas de setor
                 self._gerar_escala_folguistas()
                 self._escalar_folguistas_coberturas()
 
@@ -78,16 +88,7 @@ class GeradorEscala:
                 if corr3 > 0:
                     self.alertas.append(f"   ✅ {corr3} sequências de 3+ folgas consecutivas corrigidas")
 
-                # 6. Tentar priorizar domingos (apenas 6x1, se config ativa)
-                if self.config.domingo_ativo:
-                    self.alertas.append("\n🔧 TENTANDO PRIORIZAR DOMINGOS (6x1)...")
-                    domingos_dados = self._tentar_priorizar_domingos()
-                    if domingos_dados > 0:
-                        self.alertas.append(f"   ✅ {domingos_dados} trocas para domingo realizadas!")
-                    else:
-                        self.alertas.append("   ℹ️ Não foi possível dar mais domingos sem quebrar lotação")
-                else:
-                    self.alertas.append("\n⏭️ Priorização de domingos desativada")
+                # (domingos já garantidos no passo 4 — R1+R2)
                 
                 # 6. Validar mínimos
                 problemas = self._validar_minimos_por_dia()
@@ -225,7 +226,21 @@ class GeradorEscala:
                         break
 
                 if not inserido:
-                    self.escala_gerada[func.id][meio] = 'FOLGA'
+                    # R3: escolher dia com maior cobertura E que não conflite com folguista garantido
+                    def cobertura_dia(d):
+                        reg = sum(
+                            1 for f in funcionarios_st
+                            if f.id != func.id and
+                            self.escala_gerada.get(f.id, {}).get(d) == 'TRABALHA'
+                        )
+                        # Penalizar dias onde o folguista garantido também está de folga
+                        folg_folga = sum(
+                            1 for fid, dom in self.domingo_garantido.items()
+                            if dom == d and self.escala_gerada.get(fid, {}).get(d) == 'FOLGA'
+                        )
+                        return reg - folg_folga * 10
+                    melhor_dia = max(violacao, key=cobertura_dia)
+                    self.escala_gerada[func.id][melhor_dia] = 'FOLGA'
                     correcoes += 1
 
         return correcoes
@@ -289,7 +304,10 @@ class GeradorEscala:
                     break
 
                 # Mover o dia do meio da sequência para outro dia na sua semana
-                meio = violacao[0] + (violacao[1] - violacao[0]) // 2
+                # R1: nunca mover o domingo garantido para TRABALHA
+                dom_sagrado = self.domingo_garantido.get(func_id)
+                candidatos_meio = [d for d in range(violacao[0], violacao[1]+1) if d != dom_sagrado]
+                meio = candidatos_meio[len(candidatos_meio)//2] if candidatos_meio else violacao[0] + (violacao[1]-violacao[0])//2
                 sem = semana_do(meio)
                 if not sem:
                     break
@@ -382,7 +400,12 @@ class GeradorEscala:
                 )
 
             # Remove folgas onde os colegas já cobrem o mínimo (dias mais seguros para remover)
-            candidatos = sorted(dias_folga, key=lambda d: -cobertura(d))
+            # R1: nunca remover o domingo garantido
+            domingo_sagrado = self.domingo_garantido.get(func.id)
+            candidatos = sorted(
+                [d for d in dias_folga if d != domingo_sagrado],
+                key=lambda d: -cobertura(d)
+            )
             for dia in candidatos:
                 if excesso <= 0:
                     break
@@ -404,7 +427,70 @@ class GeradorEscala:
         )
         
         return [f for f in feriados if f.eh_dia_util()]
-    
+
+    def _garantir_domingos(self, funcionarios_regulares):
+        """
+        R1: Todo funcionário recebe exatamente 1 domingo de folga.
+        R2: Dentro do mesmo setor/turno, domingos são distribuídos sem conflito.
+        Deve rodar ANTES de qualquer outra distribuição de folgas.
+        """
+        domingos = [d for d in range(1, self.dias_mes + 1)
+                    if date(self.ano, self.mes, d).weekday() == 6]
+        if not domingos:
+            self.alertas.append("⚠️ Mês sem domingo — R1 não aplicável")
+            return
+
+        # Agrupar por setor+turno para aplicar R2
+        by_st = {}
+        for func in funcionarios_regulares:
+            key = (func.grupo_id, func.turno_id)
+            by_st.setdefault(key, []).append(func)
+
+        for (setor_id, turno_id), funcs in by_st.items():
+            st_obj = SetorTurno.objects.filter(
+                setor_id=setor_id, turno_id=turno_id
+            ).first() if setor_id and turno_id else None
+            minimo = st_obj.minimo_funcionarios if st_obj else 1
+
+            random.shuffle(funcs)  # variar distribuição a cada geração
+            domingos_usados_no_turno = {}  # domingo -> qtd de funcs já alocados
+
+            for func in funcs:
+                # R2: prefere domingos menos usados no mesmo setor/turno
+                candidatos = sorted(domingos,
+                                    key=lambda d: (domingos_usados_no_turno.get(d, 0), d))
+
+                dom_escolhido = None
+                for dom in candidatos:
+                    # R3: verifica se mínimo do setor/turno é mantido
+                    outros_trabalhando = sum(
+                        1 for f in funcs
+                        if f.id != func.id and
+                        self.escala_gerada[f.id].get(dom, 'TRABALHA') == 'TRABALHA'
+                    )
+                    if len(funcs) == 1 or outros_trabalhando >= minimo:
+                        dom_escolhido = dom
+                        break
+
+                # Se nenhum domingo mantém o mínimo, escolhe o de menor impacto
+                if dom_escolhido is None:
+                    dom_escolhido = max(
+                        domingos,
+                        key=lambda d: sum(
+                            1 for f in funcs if f.id != func.id and
+                            self.escala_gerada[f.id].get(d, 'TRABALHA') == 'TRABALHA'
+                        )
+                    )
+                    self.alertas.append(
+                        f"⚠️ R1: {func.nome} — domingo {dom_escolhido}/{self.mes:02d} "
+                        f"viola mínimo do setor (sem alternativa)"
+                    )
+
+                self.escala_gerada[func.id][dom_escolhido] = 'FOLGA'
+                self.domingo_garantido[func.id] = dom_escolhido  # R1: nunca remover
+                domingos_usados_no_turno[dom_escolhido] = \
+                    domingos_usados_no_turno.get(dom_escolhido, 0) + 1
+
     def _dividir_em_semanas_correto(self):
         """Divide o mês em semanas (Domingo a Sábado)"""
         semanas = []
@@ -444,7 +530,7 @@ class GeradorEscala:
             tipo='REGULAR',
             ativo=True,
             grupo=setor
-        ))
+        ).select_related('turno'))
 
         if not funcionarios:
             self.alertas.append(f"⚠️ Setor {setor.nome}: Nenhum funcionário!")
@@ -462,15 +548,21 @@ class GeradorEscala:
         ).count()
         minimo_regulares = max(0, minimo - folguistas_backup)
 
-        # Inicializar: todos trabalham
+        # Manter domingos já garantidos pela R1 (_garantir_domingos rodou antes)
+        # Apenas preencher dias ainda não inicializados
         for func in funcionarios:
-            self.escala_gerada[func.id] = {dia: 'TRABALHA' for dia in range(1, self.dias_mes + 1)}
+            if func.id not in self.escala_gerada:
+                self.escala_gerada[func.id] = {dia: 'TRABALHA' for dia in range(1, self.dias_mes + 1)}
+            else:
+                # Preservar folgas já atribuídas (domingos R1) — garantir que demais dias existem
+                for dia in range(1, self.dias_mes + 1):
+                    self.escala_gerada[func.id].setdefault(dia, 'TRABALHA')
 
         semanas = self._dividir_em_semanas_correto()
 
         for idx_semana, semana in enumerate(semanas):
             semana_anterior = semanas[idx_semana - 1] if idx_semana > 0 else None
-            sucesso = self._processar_semana(funcionarios, semana, minimo_regulares, idx_semana + 1, semana_anterior)
+            sucesso = self._processar_semana(funcionarios, semana, minimo_regulares, idx_semana + 1, semana_anterior, setor=setor)
             if not sucesso:
                 self.alertas.append(f"⚠️ Setor {setor.nome} — Semana {idx_semana + 1}: Impossível distribuir folgas!")
 
@@ -522,6 +614,14 @@ class GeradorEscala:
             # Dias onde este folguista é indispensável — não pode folgar
             dias_criticos = self._dias_criticos_folguista(func)
 
+            # R1: garantir 1 domingo para o folguista (preferir não-crítico)
+            domingos = [d for d in range(1, self.dias_mes + 1)
+                        if date(self.ano, self.mes, d).weekday() == 6]
+            dom_folguista = next((d for d in domingos if d not in dias_criticos), None)
+            if dom_folguista:
+                self.escala_gerada[func.id][dom_folguista] = 'FOLGA'
+                self.domingo_garantido[func.id] = dom_folguista
+
             for idx, semana in enumerate(semanas):
                 dias_count = len(semana)
                 folgas_necessarias = self._folgas_semana(func, dias_count)
@@ -540,8 +640,16 @@ class GeradorEscala:
                         else:
                             break
 
-                # Dias disponíveis para folga nesta semana (excluindo críticos)
-                dias_livres = [d for d in semana if d not in dias_criticos]
+                # Dias disponíveis para folga nesta semana (excluindo críticos e já marcados)
+                ja_tem_semana = sum(1 for d in semana if self.escala_gerada[func.id].get(d) == 'FOLGA')
+                folgas_necessarias = max(0, folgas_necessarias - ja_tem_semana)
+                if folgas_necessarias == 0:
+                    continue
+                dias_livres = [
+                    d for d in semana
+                    if d not in dias_criticos
+                    and self.escala_gerada[func.id].get(d) != 'FOLGA'
+                ]
 
                 def combinacao_valida(combinacao):
                     """Verifica consecutividade e que não cai em dia crítico."""
@@ -666,10 +774,17 @@ class GeradorEscala:
                 ]
 
                 if candidatos_folga:
-                    # Escolhe o par (setor, turno) com mais folgas (mais necessitado)
-                    from collections import Counter
-                    contagem_folgas = Counter(candidatos_folga)
-                    sid, tid = contagem_folgas.most_common(1)[0][0]
+                    # Escolhe o par (setor, turno) com menor cobertura atual (mais crítico)
+                    def urgencia_folga(par):
+                        sid, tid = par
+                        st_match = next((st for st in setor_turnos if st.setor.id == sid and st.turno.id == tid), None)
+                        minimo_st = st_match.minimo_funcionarios if st_match else 1
+                        atual = contagem_st.get((sid, tid), 0)
+                        # Menor ratio = mais urgente; desempate: menos regulares no turno
+                        total_reg = sum(1 for r in regulares if r.grupo_id == sid and r.turno_id == tid)
+                        return (atual / max(minimo_st, 1), total_reg)
+
+                    sid, tid = min(set(candidatos_folga), key=urgencia_folga)
                     setor_obj = next((st.setor for st in setor_turnos if st.setor.id == sid), None)
                     turno_obj = next((st.turno for st in setor_turnos if st.turno.id == tid), None)
                     if not setor_obj:
@@ -681,7 +796,8 @@ class GeradorEscala:
                         self.setor_coberto.setdefault(func.id, {})[dia] = sid
                         self.turno_coberto.setdefault(func.id, {})[dia] = tid
                         contagem_st[(sid, tid)] = contagem_st.get((sid, tid), 0) + 1
-                        quem_de_folga.remove((sid, tid))
+                        if (sid, tid) in quem_de_folga:
+                            quem_de_folga.remove((sid, tid))
                         continue
 
                 # 2. Fallback: SetorTurno configurado com maior déficit
@@ -793,7 +909,7 @@ class GeradorEscala:
                     return False
         return True
 
-    def _processar_semana(self, funcionarios, dias_semana, minimo, num_semana, semana_anterior=None):
+    def _processar_semana(self, funcionarios, dias_semana, minimo, num_semana, semana_anterior=None, setor=None):
         """Processa uma semana atribuindo folgas individuais respeitando o mínimo global do turno"""
         dias_count = len(dias_semana)
 
@@ -827,25 +943,31 @@ class GeradorEscala:
                 func_id = func.id
                 folgas_necessarias = self._folgas_semana(func, dias_count)
 
+                # R1: descontar folgas já atribuídas nesta semana (domingo pré-garantido)
+                ja_tem = sum(
+                    1 for d in dias_semana
+                    if self.escala_gerada[func_id].get(d) == 'FOLGA'
+                )
+                folgas_necessarias = max(0, folgas_necessarias - ja_tem)
+
                 if folgas_necessarias == 0:
                     continue
 
                 exigir_nc = self._regime_aplica_consecutivas(func.regime)
 
-                # 1ª prioridade: dia fixo configurado (folga_fixa_dia)
-                combinacoes_fixas = self._combinacoes_dia_fixo(func, dias_semana, folgas_necessarias)
+                # Dias disponíveis para nova folga nesta semana (excluir já marcados)
+                dias_livres_semana = [
+                    d for d in dias_semana
+                    if self.escala_gerada[func_id].get(d) != 'FOLGA'
+                ]
 
-                # Se a semana tem domingo e o funcionário ainda não tem nenhum,
-                # ignora o dia fixo nesta semana para garantir o domingo obrigatório
-                if (combinacoes_fixas and domingo_semana
-                        and not self._funcionario_ja_tem_domingo(func_id, domingo_semana)
-                        and not any(domingo_semana in c for c in combinacoes_fixas)):
-                    combinacoes_fixas = None
+                # 1ª prioridade: dia fixo configurado (folga_fixa_dia)
+                combinacoes_fixas = self._combinacoes_dia_fixo(func, dias_livres_semana, folgas_necessarias)
 
                 if combinacoes_fixas:
                     combinacoes = combinacoes_fixas
                 else:
-                    combinacoes = self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, exigir_nc)
+                    combinacoes = self._gerar_combinacoes_validas(dias_livres_semana, folgas_necessarias, exigir_nc)
 
                 if not combinacoes:
                     sucesso_total = False
@@ -857,36 +979,31 @@ class GeradorEscala:
                     c for c in combinacoes
                     if self._combinacao_respeita_consecutivos(func_id, c, dias_semana, semana_anterior, limite_consec)
                 ]
-                # Se nenhuma combinação respeita, aceita qualquer uma (semana muito curta ou caso extremo)
                 if not combinacoes:
-                    combinacoes = combinacoes_fixas or self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, False) or []
+                    combinacoes = combinacoes_fixas or self._gerar_combinacoes_validas(dias_livres_semana, folgas_necessarias, False) or []
 
                 if not combinacoes:
                     sucesso_total = False
                     break
 
-                # Ordenar combinações por prioridade de fim de semana
+                # Ordenar por prioridade de sábado (domingo já garantido pela R1)
                 if not combinacoes_fixas:
                     sabado_semana = next(
                         (d for d in dias_semana if date(self.ano, self.mes, d).weekday() == 5),
                         None
                     )
-                    if func.regime == '5x2' and sabado_semana and domingo_semana:
-                        # 5x2: prioridade SAB+DOM juntos, depois SAB ou DOM separado, resto
-                        par_fds = [c for c in combinacoes if sabado_semana in c and domingo_semana in c]
-                        so_sab = [c for c in combinacoes if sabado_semana in c and domingo_semana not in c]
-                        so_dom = [c for c in combinacoes if domingo_semana in c and sabado_semana not in c]
-                        outros = [c for c in combinacoes if sabado_semana not in c and domingo_semana not in c]
-                        combinacoes = par_fds + so_sab + so_dom + outros
+                    if func.regime == '5x2' and sabado_semana:
+                        com_sab = [c for c in combinacoes if sabado_semana in c]
+                        sem_sab = [c for c in combinacoes if sabado_semana not in c]
+                        random.shuffle(com_sab)
+                        random.shuffle(sem_sab)
+                        combinacoes = com_sab + sem_sab
                     else:
-                        # 6x1 ou semana sem SAB+DOM: prioridade domingo
-                        combinacoes = self._ordenar_com_prioridade_domingo(
-                            combinacoes, domingo_semana, func_id, domingo_semana or dias_semana[0]
-                        )
+                        random.shuffle(combinacoes)
 
                 folga_atribuida = False
                 for combinacao in combinacoes:
-                    if self._combinacao_mantem_minimo(func_id, combinacao, funcionarios, minimo):
+                    if self._combinacao_mantem_minimo(func_id, combinacao, funcionarios, minimo, setor=setor):
                         for dia in combinacao:
                             self.escala_gerada[func_id][dia] = 'FOLGA'
                         folga_atribuida = True
@@ -910,42 +1027,50 @@ class GeradorEscala:
             folgas_necessarias = self._folgas_semana(func, dias_count)
             if folgas_necessarias == 0:
                 continue
-            ja_tem = sum(1 for d in dias_semana if self.escala_gerada[func.id].get(d) != 'TRABALHA')
+            ja_tem = sum(1 for d in dias_semana if self.escala_gerada[func.id].get(d) == 'FOLGA')
             if ja_tem >= folgas_necessarias:
                 continue
+            folgas_necessarias -= ja_tem
+            dias_livres_fb = [
+                d for d in dias_semana
+                if self.escala_gerada[func.id].get(d) != 'FOLGA'
+            ]
 
             limite_consec = 6 if func.regime == '6x1' else 5
-            fixas_raw = self._combinacoes_dia_fixo(func, dias_semana, folgas_necessarias) or []
+            fixas_raw = self._combinacoes_dia_fixo(func, dias_livres_fb, folgas_necessarias) or []
             combinacoes_fixas = [
                 c for c in fixas_raw
                 if self._combinacao_respeita_consecutivos(func.id, c, dias_semana, semana_anterior, limite_consec)
             ]
 
             if combinacoes_fixas:
-                combinacao = random.choice(combinacoes_fixas)
+                # R3: no fallback, priorizar combinação que mantém mínimo
+                com_minimo = [c for c in combinacoes_fixas
+                              if self._combinacao_mantem_minimo(func.id, c, funcionarios, minimo, setor=setor)]
+                combinacao = random.choice(com_minimo) if com_minimo else combinacoes_fixas[0]
             else:
                 exigir_nc = self._regime_aplica_consecutivas(func.regime)
-                combinacoes = self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, exigir_nc)
+                combinacoes = self._gerar_combinacoes_validas(dias_livres_fb, folgas_necessarias, exigir_nc)
                 if not combinacoes:
-                    combinacoes = self._gerar_combinacoes_validas(dias_semana, folgas_necessarias, False)
+                    combinacoes = self._gerar_combinacoes_validas(dias_livres_fb, folgas_necessarias, False)
                 if not combinacoes:
                     continue
 
-                # Aplicar limite de consecutivos no fallback também
                 validas = [
                     c for c in combinacoes
                     if self._combinacao_respeita_consecutivos(func.id, c, dias_semana, semana_anterior, limite_consec)
                 ]
-                combinacoes = validas if validas else combinacoes  # se nada passar, aceita qualquer uma
+                combinacoes = validas if validas else combinacoes
 
-                # Prioridade fim de semana
-                if func.regime == '5x2' and sabado_semana_fb and domingo_semana:
-                    par = [c for c in combinacoes if sabado_semana_fb in c and domingo_semana in c]
-                    combinacoes = par + [c for c in combinacoes if c not in par]
-                elif domingo_semana:
-                    combinacoes = self._ordenar_com_prioridade_domingo(
-                        combinacoes, domingo_semana, func.id, domingo_semana
-                    )
+                # R3: priorizar combinações que mantêm mínimo
+                com_minimo = [c for c in combinacoes
+                              if self._combinacao_mantem_minimo(func.id, c, funcionarios, minimo, setor=setor)]
+                combinacoes = com_minimo if com_minimo else combinacoes
+
+                if sabado_semana_fb:
+                    com_sab = [c for c in combinacoes if sabado_semana_fb in c]
+                    combinacoes = com_sab + [c for c in combinacoes if c not in com_sab]
+
                 combinacao = combinacoes[0]
 
             for dia in combinacao:
@@ -968,23 +1093,53 @@ class GeradorEscala:
 
         return []
     
-    def _combinacao_mantem_minimo(self, func_id, dias_folga, funcionarios, minimo):
-        """Verifica se folgas mantém mínimo em todos os dias"""
+    def _combinacao_mantem_minimo(self, func_id, dias_folga, funcionarios, minimo, setor=None):
+        """Verifica se folgas mantém mínimo em todos os dias.
+        Checa tanto o mínimo total do setor quanto o mínimo por turno (SetorTurno).
+        Desconta folguistas habilitados do mínimo exigido de regulares (eles cobrem a folga)."""
+        setor_turnos = list(SetorTurno.objects.filter(setor=setor).select_related('turno')) if setor else []
+
+        # Pré-computar quantos folguistas habilitados existem para cada turno deste setor
+        folguistas_por_turno = {}
+        for st in setor_turnos:
+            folguistas_por_turno[st.turno.id] = Funcionario.objects.filter(
+                tipo='FOLGUISTA', ativo=True,
+                grupos_habilitados=setor,
+                turnos_habilitados=st.turno
+            ).count()
+
         for dia in dias_folga:
-            trabalhando = 0
-            for f in funcionarios:
-                if f.id == func_id:
-                    continue
-                
-                if f.id in self.escala_gerada:
-                    if self.escala_gerada[f.id].get(dia) == 'TRABALHA':
-                        trabalhando += 1
-                else:
-                    trabalhando += 1
-            
+            # 1. Mínimo total do setor
+            trabalhando = sum(
+                1 for f in funcionarios
+                if f.id != func_id and (
+                    f.id not in self.escala_gerada or
+                    self.escala_gerada[f.id].get(dia) == 'TRABALHA'
+                )
+            )
             if trabalhando < minimo:
                 return False
-        
+
+            # 2. Mínimo por turno — desconta folguistas habilitados disponíveis
+            for st in setor_turnos:
+                regulares_no_turno = [f for f in funcionarios if f.turno_id == st.turno.id]
+                if not regulares_no_turno:
+                    continue
+
+                # Folguistas habilitados reduzem o mínimo exigido de regulares
+                folg_backup = folguistas_por_turno.get(st.turno.id, 0)
+                minimo_regulares = max(0, min(st.minimo_funcionarios, len(regulares_no_turno)) - folg_backup)
+
+                turno_trabalhando = sum(
+                    1 for f in regulares_no_turno
+                    if f.id != func_id and (
+                        f.id not in self.escala_gerada or
+                        self.escala_gerada[f.id].get(dia) == 'TRABALHA'
+                    )
+                )
+                if turno_trabalhando < minimo_regulares:
+                    return False
+
         return True
     
     def _tentar_priorizar_domingos(self):
@@ -1127,7 +1282,7 @@ class GeradorEscala:
                 )
                 trabalhando = regulares + folguistas
 
-                if trabalhando < st.minimo_funcionarios:
+                if trabalhando < st.minimo_funcionarios and not st.permite_zero:
                     problemas.append(
                         f"DIA {dia:02d}/{self.mes:02d} - "
                         f"{st.setor.nome}/{st.turno.nome}: {trabalhando}/{st.minimo_funcionarios}"
@@ -1329,7 +1484,7 @@ class GeradorEscala:
                     self.turno_coberto.get(fid, {}).get(dia) == st.turno.id
                 )
 
-                if regulares + folguistas < st.minimo_funcionarios:
+                if regulares + folguistas < st.minimo_funcionarios and not st.permite_zero:
                     return False
 
         return True

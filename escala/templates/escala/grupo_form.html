@@ -33,13 +33,20 @@
               ({{ turno.horario_entrada|time:"H:i" }} – {{ turno.horario_saida|time:"H:i" }})
             </span>
           </label>
-          <div style="display:flex;align-items:center;gap:6px;" id="minimo-box-{{ turno.id }}"
+          <div style="display:flex;align-items:center;gap:12px;" id="minimo-box-{{ turno.id }}"
                {% if not grupo or turno.id not in setor_turnos %}style="opacity:0.3;pointer-events:none;"{% endif %}>
-            <label style="font-size:12px;color:#64748b;white-space:nowrap;">Mín. func.:</label>
-            <input type="number" name="minimo_turno_{{ turno.id }}" min="1" max="99"
-                   value="1"
-                   id="min-{{ turno.id }}"
-                   style="width:64px;padding:6px 8px;border:2px solid #e2e8f0;border-radius:6px;font-size:14px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <label style="font-size:12px;color:#64748b;white-space:nowrap;">Mín. func.:</label>
+              <input type="number" name="minimo_turno_{{ turno.id }}" min="1" max="99"
+                     value="1"
+                     id="min-{{ turno.id }}"
+                     style="width:64px;padding:6px 8px;border:2px solid #e2e8f0;border-radius:6px;font-size:14px;">
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" name="permite_zero_{{ turno.id }}" id="pz-{{ turno.id }}"
+                     style="width:15px;height:15px;cursor:pointer;">
+              <label for="pz-{{ turno.id }}" style="font-size:12px;color:#64748b;white-space:nowrap;cursor:pointer;">Permite zero</label>
+            </div>
           </div>
         </div>
         {% endwith %}
@@ -61,16 +68,17 @@
 const setor_turnos_data = {
   {% if setor_turnos %}
     {% for tid, st in setor_turnos.items %}
-    "{{ tid }}": {{ st.minimo_funcionarios }},
+    "{{ tid }}": { "minimo": {{ st.minimo_funcionarios }}, "permite_zero": {{ st.permite_zero|yesno:"true,false" }} },
     {% endfor %}
   {% endif %}
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-  // Preenche valores dos inputs de mínimo
-  Object.entries(setor_turnos_data).forEach(([tid, minimo]) => {
+  Object.entries(setor_turnos_data).forEach(([tid, data]) => {
     const inp = document.getElementById('min-' + tid);
-    if (inp) inp.value = minimo;
+    if (inp) inp.value = data.minimo;
+    const chk = document.getElementById('pz-' + tid);
+    if (chk) chk.checked = data.permite_zero;
   });
 });
 

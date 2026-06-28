@@ -222,11 +222,23 @@ def escala_detalhe(request, pk):
                 }
             func_dict[fid]['dias_situacao'][dia_obj.data.day] = dia_obj.situacao
         if func_dict:
+            # Ordenar por turno (MANHA → INTERMEDIARIO → TARDE → NOITE) e depois nome
+            ORDEM_TURNO = {'MANHA': 0, 'INTERMEDIARIO': 1, 'TARDE': 2, 'NOITE': 3}
+            fds_ordenados = sorted(
+                func_dict.values(),
+                key=lambda fd: (ORDEM_TURNO.get(fd['turno_nome'].upper(), 99), fd['nome'])
+            )
+            # Para regulares: mostra abreviação do turno nas células de TRABALHA
+            funcionarios_linhas = []
+            for fd in fds_ordenados:
+                abrev = fd['turno_nome'][:3].upper() if fd['turno_nome'] else None
+                dias_label = [abrev] * (dias_mes + 1)  # mesmo turno todos os dias
+                funcionarios_linhas.append(montar_linha(fd, dias_turno=dias_label))
             turnos_data.append({
                 'nome': setor.nome,
-                'horario': '',   # setor não tem horário fixo
-                'funcionarios': [montar_linha(fd) for fd in func_dict.values()],
-                'func_detalhes': list(func_dict.values()),  # com turno_nome e horario por func
+                'horario': '',
+                'funcionarios': funcionarios_linhas,
+                'func_detalhes': list(func_dict.values()),
             })
 
     # Folguistas section
@@ -1108,9 +1120,14 @@ def _salvar_setor_turnos(request, grupo):
     grupo.turnos_operados.all().delete()
     for tid in turno_ids:
         minimo = int(request.POST.get(f'minimo_turno_{tid}', 1) or 1)
+        permite_zero = request.POST.get(f'permite_zero_{tid}') == 'on'
         try:
             turno = Turno.objects.get(id=int(tid))
-            SetorTurno.objects.create(setor=grupo, turno=turno, minimo_funcionarios=max(1, minimo))
+            SetorTurno.objects.create(
+                setor=grupo, turno=turno,
+                minimo_funcionarios=max(1, minimo),
+                permite_zero=permite_zero,
+            )
         except (Turno.DoesNotExist, ValueError):
             pass
 

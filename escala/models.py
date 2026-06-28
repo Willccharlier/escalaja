@@ -52,6 +52,10 @@ class SetorTurno(models.Model):
         default=1, validators=[MinValueValidator(1)],
         help_text='Mínimo de funcionários neste setor neste turno'
     )
+    permite_zero = models.BooleanField(
+        default=False,
+        help_text='Se marcado, este setor/turno pode ficar com zero funcionários sem gerar alerta'
+    )
 
     class Meta:
         unique_together = ['setor', 'turno']
